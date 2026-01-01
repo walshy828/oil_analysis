@@ -2027,7 +2027,10 @@ async function showLocationModal(locationId = null) {
     </form>
     `;
 
-  document.getElementById('modal-confirm').onclick = () => saveLocation(locationId);
+  const confirmBtn = document.getElementById('modal-confirm');
+  confirmBtn.textContent = 'Save';
+  confirmBtn.disabled = false;
+  confirmBtn.onclick = () => saveLocation(locationId);
   openModal();
 }
 
@@ -2117,14 +2120,14 @@ async function renderUsagePage(container) {
 
     container.innerHTML = `
       ${headerHtml}
-      <div class="page-body">
-        <div class="empty-state">
-          <h3 class="empty-state-title">No Locations</h3>
-          <p class="empty-state-text">Please add a location first to track tank usage.</p>
-          <a href="#locations" class="btn btn-primary">Add Location</a>
-        </div>
-      </div>
-    `;
+  <div class="page-body">
+    <div class="empty-state">
+      <h3 class="empty-state-title">No Locations</h3>
+      <p class="empty-state-text">Please add a location first to track tank usage.</p>
+      <a href="#locations" class="btn btn-primary">Add Location</a>
+    </div>
+  </div>
+  `;
     return;
   }
 
@@ -2482,7 +2485,7 @@ async function loadUsageData() {
       levelValue.textContent = `${currentLevel.current_gallons} gal`;
       levelValue.style.color = color;
       levelSub.textContent = `${percent}% of ${currentLevel.tank_capacity} gal capacity`;
-      levelBar.style.setProperty('--bar-width', `${percent}%`);
+      levelBar.style.setProperty('--bar-width', `${percent}% `);
       levelBar.style.setProperty('--bar-color', color);
     } else {
       levelValue.textContent = 'No data';
@@ -2492,12 +2495,12 @@ async function loadUsageData() {
 
     // Usage Summary
     document.getElementById('usage-total-value').textContent = `${usageSummary.total_usage} gal`;
-    document.getElementById('usage-avg-sub').textContent = `${usageSummary.avg_daily_usage} gal/day average`;
+    document.getElementById('usage-avg-sub').textContent = `${usageSummary.avg_daily_usage} gal / day average`;
 
     // Cost Estimate
-    document.getElementById('cost-total-value').textContent = `$${usageSummary.estimated_cost.toFixed(2)}`;
+    document.getElementById('cost-total-value').textContent = `$${usageSummary.estimated_cost.toFixed(2)} `;
     document.getElementById('cost-price-sub').textContent = usageSummary.latest_price
-      ? `@ $${usageSummary.latest_price.toFixed(3)}/gal`
+      ? `@$${usageSummary.latest_price.toFixed(3)}/gal`
       : 'No price data';
 
     // Chart title
