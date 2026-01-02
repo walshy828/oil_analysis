@@ -15,10 +15,13 @@ async def get_company_trends(
     company_ids: List[int] = Query(...),
     date_from: date = Query(None),
     date_to: date = Query(None),
-    aggregation: str = Query("daily", enum=["daily", "weekly", "monthly"]),
+    aggregation: str = Query("daily"),
     db: Session = Depends(get_db)
 ):
     """Fetch price trends for multiple companies with forward-filling and aggregation."""
+    # Ensure aggregation is a string
+    agg_type = str(aggregation) if not hasattr(aggregation, 'default') else "daily"
+    
     if not date_to:
         date_to = date.today()
     if not date_from:
@@ -50,7 +53,7 @@ async def get_company_trends(
             series[curr.isoformat()] = last_val
             curr += timedelta(days=1)
             
-        agg = aggregate_series(series, aggregation)
+        agg = aggregate_series(series, agg_type)
         results[str(cid)] = {
             "name": company_map.get(cid, f"Company {cid}"),
             "data": agg
@@ -64,25 +67,38 @@ async def get_company_trends(
 
 def aggregate_series(series: Dict[str, float], aggregation: str) -> Dict[str, float]:
     """Aggregate a timeseries (date_str -> value) by day, week, or month."""
-    if aggregation == "daily":
+    # Safety check for aggregation type
+    agg_type = str(aggregation) if not hasattr(aggregation, 'default') else "daily"
+    
+    if agg_type == "daily":
         return series
         
     grouped = {}
     for d_str, val in series.items():
-        dt = date.fromisoformat(d_str)
-        if aggregation == "weekly":
-            # Start of week (Sunday)
-            key = (dt - timedelta(days=dt.weekday() + 1 if dt.weekday() != 6 else 0)).isoformat()
-        elif aggregation == "monthly":
-            key = dt.replace(day=1).isoformat()
-        else:
+        try:
+            dt = date.fromisoformat(d_str)
+            if agg_type == "weekly":
+                # Start of week (Sunday)
+                key = (dt - timedelta(days=dt.weekday() + 1 if dt.weekday() != 6 else 0)).isoformat()
+            elif agg_type == "monthly":
+                key = dt.replace(day=1).isoformat()
+            else:
+                key = d_str
+        except Exception:
             key = d_str
             
         if key not in grouped:
             grouped[key] = []
-        grouped[key].append(val)
+        if val is not None:
+            grouped[key].append(float(val))
         
-    return {k: round(mean(v), 4) for k, v in grouped.items()}
+    res = {}
+    for k, v in grouped.items():
+        if v:
+            res[k] = round(sum(v) / len(v), 4)
+        else:
+            res[k] = 0
+    return res
 
 
 @router.get("/lead-lag")
@@ -159,7 +175,13 @@ async def get_lead_lag_analysis(
     
     # 3. Consider Crack Spread for Prediction
     # We'll peak at the latest crack spread
-    crack_res = await get_crack_spread(date_from=date_to - timedelta(days=7), date_to=date_to, db=db)
+    # Pass aggregation explicitly to avoid Query object issues
+    crack_res = await get_crack_spread(
+        date_from=date_to - timedelta(days=7), 
+        date_to=date_to, 
+        aggregation="daily",
+        db=db
+    )
     latest_spread = crack_res[-1]["spread"] if crack_res else 0
     prev_spread = crack_res[0]["spread"] if len(crack_res) > 1 else latest_spread
     spread_delta = latest_spread - prev_spread

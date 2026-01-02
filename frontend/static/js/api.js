@@ -83,10 +83,11 @@ class ApiClient {
     return this.request('/dashboard/order-insights');
   }
 
-  async getTemperatureCorrelation(dateFrom = null, dateTo = null, locationId = null) {
+  async getTemperatureCorrelation(dateFrom = null, dateTo = null, aggregation = 'daily', locationId = null) {
     const params = new URLSearchParams();
     if (dateFrom) params.append('date_from', dateFrom);
     if (dateTo) params.append('date_to', dateTo);
+    if (aggregation) params.append('aggregation', aggregation);
     if (locationId) params.append('location_id', locationId);
     return this.request(`/dashboard/temperature-correlation?${params}`);
   }

@@ -4055,25 +4055,40 @@ async function renderAnalyticsPage(container) {
 
   // Fetch and Render Temperature Correlation for Analytics
   try {
-    const tempCorrelation = await api.getTemperatureCorrelation(analyticsStartDate, analyticsEndDate);
-    const tempContainer = document.createElement('div');
-    tempContainer.className = 'card mt-lg';
-    tempContainer.innerHTML = `
-        <div class="card-header">
-            <h3 class="card-title">Temperature & Usage Correlation</h3>
-        </div>
-        <div class="card-body">
-            <div class="chart-container" style="height: 350px;">
-                <canvas id="analytics-temp-chart"></canvas>
-            </div>
-        </div>
-      `;
-    document.querySelector('.page-body').appendChild(tempContainer);
+    // Expert UX: Clean up previous chart instance to avoid "Canvas already in use" error
+    if (typeof destroyChart === 'function') {
+      destroyChart('analytics-temp');
+    }
+
+    const tempCorrelation = await api.getTemperatureCorrelation(analyticsStartDate, analyticsEndDate, analyticsAggregation);
+
+    // Check if the container already exists from a previous render of the same page load
+    let tempContainer = document.getElementById('analytics-temp-card');
+    if (!tempContainer) {
+      tempContainer = document.createElement('div');
+      tempContainer.id = 'analytics-temp-card';
+      tempContainer.className = 'card mt-lg';
+      tempContainer.innerHTML = `
+          <div class="card-header">
+              <h3 class="card-title">Temperature & Usage Correlation</h3>
+          </div>
+          <div class="card-body">
+              <div class="chart-container" style="height: 350px;">
+                  <canvas id="analytics-temp-chart"></canvas>
+              </div>
+          </div>
+        `;
+      const pageBody = document.querySelector('.page-body');
+      if (pageBody) pageBody.appendChild(tempContainer);
+    }
 
     const tempCtx = document.getElementById('analytics-temp-chart');
-    if (tempCorrelation.temperatures?.labels?.length > 0) {
-      storeChart('analytics-temp', createTemperatureChart(tempCtx, tempCorrelation));
-    } else {
+    if (tempCtx && tempCorrelation.temperatures?.labels?.length > 0) {
+      const chart = createTemperatureChart(tempCtx, tempCorrelation);
+      if (typeof storeChart === 'function') {
+        storeChart('analytics-temp', chart);
+      }
+    } else if (tempCtx) {
       tempCtx.parentElement.innerHTML = `
           <div class="empty-state" style="padding: var(--space-xl) 0;">
               <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--text-tertiary); margin-bottom: var(--space-md);">

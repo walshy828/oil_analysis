@@ -198,10 +198,13 @@ async def get_temperature_correlation(
     days: Optional[int] = 365,
     date_from: Optional[date] = None,
     date_to: Optional[date] = None,
+    aggregation: str = Query("daily", enum=["daily", "weekly", "monthly"]),
     location_id: Optional[int] = None,
     db: Session = Depends(get_db)
 ):
-    """Get temperature and oil usage data for correlation."""
+    """Get temperature and oil usage data for correlation with aggregation."""
+    from statistics import mean
+    
     if date_from:
         start_date = date_from
     else:
@@ -226,25 +229,54 @@ async def get_temperature_correlation(
         usage_query = usage_query.filter(DailyUsage.location_id == location_id)
         
     usage_records = usage_query.order_by(DailyUsage.date).all()
+
+    # Pre-process into daily dicts
+    temp_dict = {t.date.isoformat(): (float(t.low_temp) + float(t.high_temp)) / 2 if (t.low_temp and t.high_temp) else None for t in temps}
+    usage_dict = {r.date.isoformat(): float(r.gallons) for r in usage_records}
     
-    usage_data = [
-        {
-            "date": r.date.isoformat(),
-            "gallons": float(r.gallons)
-        }
-        for r in usage_records
-    ]
+    # All dates in range
+    all_dates = []
+    curr = start_date
+    while curr <= end_date:
+        all_dates.append(curr.isoformat())
+        curr += timedelta(days=1)
+
+    if aggregation == "daily":
+        labels = all_dates
+        avg_temps = [temp_dict.get(d) for d in all_dates]
+        usage_data = [{"date": d, "gallons": usage_dict.get(d, 0)} for d in all_dates]
+    else:
+        grouped_temp = {}
+        grouped_usage = {}
+        
+        for d_str in all_dates:
+            dt = date.fromisoformat(d_str)
+            if aggregation == "weekly":
+                key = (dt - timedelta(days=dt.weekday() + 1 if dt.weekday() != 6 else 0)).isoformat()
+            else: # monthly
+                key = dt.replace(day=1).isoformat()
+            
+            if key not in grouped_temp:
+                grouped_temp[key] = []
+                grouped_usage[key] = 0
+            
+            val = temp_dict.get(d_str)
+            if val is not None:
+                grouped_temp[key].append(val)
+            grouped_usage[key] += usage_dict.get(d_str, 0)
+        
+        sorted_keys = sorted(grouped_temp.keys())
+        labels = sorted_keys
+        avg_temps = [mean(grouped_temp[k]) if grouped_temp[k] else None for k in sorted_keys]
+        usage_data = [{"date": k, "gallons": grouped_usage[k]} for k in sorted_keys]
     
     return {
         "temperatures": {
-            "labels": [t.date.isoformat() for t in temps],
-            "low": [float(t.low_temp) if t.low_temp else None for t in temps],
-            "high": [float(t.high_temp) if t.high_temp else None for t in temps],
-            "avg": [
-                (float(t.low_temp) + float(t.high_temp)) / 2 
-                if t.low_temp and t.high_temp else None 
-                for t in temps
-            ],
+            "labels": labels,
+            "avg": avg_temps,
+            # Placeholder for backward compatibility if needed, though most charts use 'avg'
+            "low": [0] * len(labels), 
+            "high": [0] * len(labels)
         },
-        "orders": usage_data  # Returning usage as 'orders' key for compatibility
+        "orders": usage_data
     }
