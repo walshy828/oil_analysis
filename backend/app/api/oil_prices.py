@@ -84,12 +84,25 @@ async def get_latest_prices(
     db: Session = Depends(get_db)
 ):
     """Get the most recent price snapshot for every company."""
-    from sqlalchemy import text
+    from sqlalchemy import text, func
     from sqlalchemy.orm import joinedload
     
-    # Use raw SQL with DISTINCT ON for reliable single-row-per-company results
-    # This gets the most recently scraped price for each company
-    query = text("""
+    # 1. Get the absolute latest scrape timestamp
+    latest_ts = db.query(func.max(OilPrice.scraped_at)).scalar()
+    
+    # 2. Build query
+    # Use raw SQL. If we have a latest_ts, filter by it strictly.
+    # Otherwise, fallback to DISTINCT ON behavior (though without scraped_at, likely manual data).
+    
+    where_clause = "WHERE c.merged_into_id IS NULL AND (:type = 'all' OR (:type = 'local' AND c.is_market_index = false) OR (:type = 'market' AND c.is_market_index = true))"
+    
+    params = {"type": type}
+    
+    if latest_ts:
+        where_clause += " AND p.scraped_at = :latest_ts"
+        params["latest_ts"] = latest_ts
+        
+    query = text(f"""
         SELECT DISTINCT ON (p.company_id)
             p.id, 
             p.company_id, 
@@ -102,12 +115,11 @@ async def get_latest_prices(
             p.scraped_at
         FROM oil_prices p
         JOIN companies c ON p.company_id = c.id
-        WHERE c.merged_into_id IS NULL
-        AND (:type = 'all' OR (:type = 'local' AND c.is_market_index = false) OR (:type = 'market' AND c.is_market_index = true))
+        {where_clause}
         ORDER BY p.company_id, p.scraped_at DESC
     """)
     
-    result = db.execute(query, {"type": type})
+    result = db.execute(query, params)
     rows = result.fetchall()
     
     # Build response with aliases

@@ -14,19 +14,21 @@ router = APIRouter()
 async def get_dashboard_summary(db: Session = Depends(get_db)):
     """Get dashboard summary with latest price, last order, and key metrics."""
     
-    # Get latest oil price (excluding market indices)
-    latest_price = db.query(OilPrice).join(Company).filter(
-        Company.is_market_index == False
-    ).order_by(desc(OilPrice.date_reported)).first()
+    # Get latest scrape timestamp
+    latest_scrape_time = db.query(func.max(OilPrice.scraped_at)).scalar()
     
-    # Get cheapest vendor from latest scrape (local only)
-    if latest_price:
-        latest_date = latest_price.date_reported
+    if latest_scrape_time:
+        # Get cheapest vendor from latest scrape (local only)
         cheapest = db.query(OilPrice, Company).join(Company).filter(
-            OilPrice.date_reported == latest_date,
+            OilPrice.scraped_at == latest_scrape_time,
             Company.is_market_index == False
         ).order_by(OilPrice.price_per_gallon).first()
+        
+        # Use the cheapest price as the 'latest_price' reference for simplicity, 
+        # or grab the first entry if 'latest_price' is meant to be just 'a price'
+        latest_price = cheapest[0] if cheapest else None
     else:
+        latest_price = None
         cheapest = None
     
     # Get last oil order
