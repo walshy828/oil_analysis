@@ -19,9 +19,6 @@ async def get_company_trends(
     db: Session = Depends(get_db)
 ):
     """Fetch price trends for multiple companies with forward-filling and aggregation."""
-    # Ensure aggregation is a string
-    agg_type = str(aggregation) if not hasattr(aggregation, 'default') else "daily"
-    
     if not date_to:
         date_to = date.today()
     if not date_from:
@@ -53,7 +50,7 @@ async def get_company_trends(
             series[curr.isoformat()] = last_val
             curr += timedelta(days=1)
             
-        agg = aggregate_series(series, agg_type)
+        agg = aggregate_series(series, aggregation)
         results[str(cid)] = {
             "name": company_map.get(cid, f"Company {cid}"),
             "data": agg
@@ -67,10 +64,7 @@ async def get_company_trends(
 
 def aggregate_series(series: Dict[str, float], aggregation: str) -> Dict[str, float]:
     """Aggregate a timeseries (date_str -> value) by day, week, or month."""
-    # Safety check for aggregation type
-    agg_type = str(aggregation) if not hasattr(aggregation, 'default') else "daily"
-    
-    if agg_type == "daily":
+    if aggregation == "daily":
         return series
         
     grouped = {}

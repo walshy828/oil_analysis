@@ -1,8 +1,9 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func, desc
 from datetime import date, timedelta
 from typing import Optional
+from statistics import mean
 
 from app.database import get_db
 from app.models import OilPrice, OilOrder, Company, Temperature, Location, TankReading, DailyUsage
@@ -203,7 +204,6 @@ async def get_temperature_correlation(
     db: Session = Depends(get_db)
 ):
     """Get temperature and oil usage data for correlation with aggregation."""
-    from statistics import mean
     
     if date_from:
         start_date = date_from
