@@ -79,8 +79,14 @@ class ApiClient {
     return this.request(`/dashboard/order-trends?${params}`);
   }
 
-  async getTemperatureCorrelation(days = 365, locationId = null) {
-    const params = new URLSearchParams({ days });
+  async getOrderInsights() {
+    return this.request('/dashboard/order-insights');
+  }
+
+  async getTemperatureCorrelation(dateFrom = null, dateTo = null, locationId = null) {
+    const params = new URLSearchParams();
+    if (dateFrom) params.append('date_from', dateFrom);
+    if (dateTo) params.append('date_to', dateTo);
     if (locationId) params.append('location_id', locationId);
     return this.request(`/dashboard/temperature-correlation?${params}`);
   }
@@ -254,6 +260,14 @@ class ApiClient {
     if (dateFrom) url += `&date_from=${dateFrom}`;
     if (dateTo) url += `&date_to=${dateTo}`;
     return this.request(url);
+  }
+
+  async getCompanyTrends(companyIds, dateFrom, dateTo, aggregation = 'daily') {
+    const params = new URLSearchParams({ aggregation });
+    companyIds.forEach(id => params.append('company_ids', id));
+    if (dateFrom) params.append('date_from', dateFrom);
+    if (dateTo) params.append('date_to', dateTo);
+    return this.request(`/analytics/company-trends?${params}`);
   }
 
   async getYoYComparison(year = null, locationId = null) {

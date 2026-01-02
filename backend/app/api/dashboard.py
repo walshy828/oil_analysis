@@ -17,19 +17,37 @@ async def get_dashboard_summary(db: Session = Depends(get_db)):
     # Get latest scrape timestamp
     latest_scrape_time = db.query(func.max(OilPrice.scraped_at)).scalar()
     
+    latest_price_info = None
+    cheapest_info = None
+    
     if latest_scrape_time:
-        # Get cheapest vendor from latest scrape (local only)
-        cheapest = db.query(OilPrice, Company).join(Company).filter(
+        # 1. Find the absolute minimum price in the latest scrape
+        min_price = db.query(func.min(OilPrice.price_per_gallon)).join(Company).filter(
             OilPrice.scraped_at == latest_scrape_time,
             Company.is_market_index == False
-        ).order_by(OilPrice.price_per_gallon).first()
+        ).scalar()
         
-        # Use the cheapest price as the 'latest_price' reference for simplicity, 
-        # or grab the first entry if 'latest_price' is meant to be just 'a price'
-        latest_price = cheapest[0] if cheapest else None
-    else:
-        latest_price = None
-        cheapest = None
+        if min_price is not None:
+            # 2. Get all companies that have this minimum price
+            cheapest_entries = db.query(OilPrice, Company).join(Company).filter(
+                OilPrice.scraped_at == latest_scrape_time,
+                OilPrice.price_per_gallon == min_price,
+                Company.is_market_index == False
+            ).all()
+            
+            company_names = ", ".join([c.name for p, c in cheapest_entries])
+            first_entry = cheapest_entries[0][0]
+            
+            latest_price_info = {
+                "price": float(min_price),
+                "date": first_entry.date_reported.isoformat(),
+                "company": company_names
+            }
+            
+            cheapest_info = {
+                "name": company_names,
+                "price": float(min_price)
+            }
     
     # Get last oil order
     last_order = db.query(OilOrder, Location, Company).outerjoin(
@@ -63,15 +81,8 @@ async def get_dashboard_summary(db: Session = Depends(get_db)):
     ).filter(OilOrder.start_date >= year_start).scalar() or 0
     
     return {
-        "latest_price": {
-            "price": float(latest_price.price_per_gallon) if latest_price else None,
-            "date": latest_price.date_reported.isoformat() if latest_price else None,
-            "company": cheapest[1].name if cheapest else None,
-        } if latest_price else None,
-        "cheapest_vendor": {
-            "name": cheapest[1].name,
-            "price": float(cheapest[0].price_per_gallon),
-        } if cheapest else None,
+        "latest_price": latest_price_info,
+        "cheapest_vendor": cheapest_info,
         "last_order": {
             "date": last_order[0].start_date.isoformat(),
             "gallons": float(last_order[0].gallons),
@@ -158,23 +169,58 @@ async def get_order_trends(
     }
 
 
+@router.get("/order-insights")
+async def get_order_insights(db: Session = Depends(get_db)):
+    """Get yearly insights for order history trends."""
+    # Group by year using SQL extract
+    yearly_stats = db.query(
+        func.extract('year', OilOrder.start_date).label('year'),
+        func.sum(OilOrder.gallons).label('total_gallons'),
+        func.sum(OilOrder.gallons * OilOrder.price_per_gallon).label('total_cost'),
+        func.avg(OilOrder.price_per_gallon).label('avg_price_per_gallon'),
+        func.count(OilOrder.id).label('order_count')
+    ).group_by('year').order_by('year').all()
+
+    return [
+        {
+            "year": int(r.year),
+            "total_gallons": float(r.total_gallons),
+            "total_cost": float(r.total_cost),
+            "avg_price_per_gallon": float(r.avg_price_per_gallon),
+            "order_count": int(r.order_count)
+        }
+        for r in yearly_stats
+    ]
+
+
 @router.get("/temperature-correlation")
 async def get_temperature_correlation(
-    days: int = 365,
+    days: Optional[int] = 365,
+    date_from: Optional[date] = None,
+    date_to: Optional[date] = None,
     location_id: Optional[int] = None,
     db: Session = Depends(get_db)
 ):
     """Get temperature and oil usage data for correlation."""
-    start_date = date.today() - timedelta(days=days)
+    if date_from:
+        start_date = date_from
+    else:
+        start_date = date.today() - timedelta(days=days or 365)
+    
+    end_date = date_to or date.today()
     
     # Get temperatures
     query = db.query(Temperature).filter(Temperature.date >= start_date)
+    if end_date:
+        query = query.filter(Temperature.date <= end_date)
     if location_id:
         query = query.filter(Temperature.location_id == location_id)
     temps = query.order_by(Temperature.date).all()
     
     # Get daily usage from normalized table
     usage_query = db.query(DailyUsage).filter(DailyUsage.date >= start_date)
+    if end_date:
+        usage_query = usage_query.filter(DailyUsage.date <= end_date)
     
     if location_id:
         usage_query = usage_query.filter(DailyUsage.location_id == location_id)

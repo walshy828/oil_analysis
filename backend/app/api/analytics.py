@@ -10,6 +10,58 @@ from app.models import OilPrice, Company, OilOrder, Temperature
 
 router = APIRouter()
 
+@router.get("/company-trends")
+async def get_company_trends(
+    company_ids: List[int] = Query(...),
+    date_from: date = Query(None),
+    date_to: date = Query(None),
+    aggregation: str = Query("daily", enum=["daily", "weekly", "monthly"]),
+    db: Session = Depends(get_db)
+):
+    """Fetch price trends for multiple companies with forward-filling and aggregation."""
+    if not date_to:
+        date_to = date.today()
+    if not date_from:
+        date_from = date_to - timedelta(days=90)
+        
+    companies = db.query(Company).filter(Company.id.in_(company_ids)).all()
+    company_map = {c.id: c.name for c in companies}
+    
+    results = {}
+    all_dates = set()
+    
+    for cid in company_ids:
+        prices = db.query(OilPrice.date_reported, OilPrice.price_per_gallon).filter(
+            OilPrice.company_id == cid,
+            OilPrice.date_reported >= date_from,
+            OilPrice.date_reported <= date_to
+        ).order_by(OilPrice.date_reported).all()
+        
+        # Forward fill
+        series = {}
+        curr = date_from
+        last_val = None
+        data_map = {p.date_reported: float(p.price_per_gallon) for p in prices}
+        
+        while curr <= date_to:
+            val = data_map.get(curr)
+            if val is not None:
+                last_val = val
+            series[curr.isoformat()] = last_val
+            curr += timedelta(days=1)
+            
+        agg = aggregate_series(series, aggregation)
+        results[str(cid)] = {
+            "name": company_map.get(cid, f"Company {cid}"),
+            "data": agg
+        }
+        all_dates.update(agg.keys())
+        
+    return {
+        "dates": sorted(list(all_dates)),
+        "trends": results
+    }
+
 def aggregate_series(series: Dict[str, float], aggregation: str) -> Dict[str, float]:
     """Aggregate a timeseries (date_str -> value) by day, week, or month."""
     if aggregation == "daily":

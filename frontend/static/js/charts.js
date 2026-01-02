@@ -464,6 +464,92 @@ function createOrderVolumeInsightChart(ctx, orders) {
 }
 
 /**
+ * Create a Yearly Order Insight chart showing tons of data
+ */
+function createYearlyOrderInsightChart(ctx, data) {
+    return new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: data.map(d => d.year),
+            datasets: [
+                {
+                    label: 'Total Cost ($)',
+                    data: data.map(d => d.total_cost),
+                    backgroundColor: chartColors.primary + '80',
+                    borderColor: chartColors.primary,
+                    borderWidth: 1,
+                    yAxisID: 'y',
+                    order: 2
+                },
+                {
+                    label: 'Gallons',
+                    data: data.map(d => d.total_gallons),
+                    backgroundColor: chartColors.success + '40',
+                    borderColor: chartColors.success,
+                    borderWidth: 1,
+                    yAxisID: 'y1',
+                    order: 3
+                },
+                {
+                    label: 'Avg Price ($/gal)',
+                    data: data.map(d => d.avg_price_per_gallon),
+                    type: 'line',
+                    borderColor: chartColors.warning,
+                    backgroundColor: 'transparent',
+                    borderWidth: 3,
+                    pointRadius: 4,
+                    tension: 0.3,
+                    yAxisID: 'y2',
+                    order: 1
+                }
+            ]
+        },
+        options: {
+            ...chartConfig,
+            scales: {
+                x: {
+                    grid: { display: false }
+                },
+                y: {
+                    type: 'linear',
+                    position: 'left',
+                    title: { display: true, text: 'Cost / Gallons' },
+                    grid: { color: 'rgba(255,255,255,0.05)' }
+                },
+                y1: {
+                    type: 'linear',
+                    position: 'right',
+                    display: false, // Hidden but used for scaling if needed, or we can just use y
+                },
+                y2: {
+                    type: 'linear',
+                    position: 'right',
+                    title: { display: true, text: 'Avg Price ($/gal)' },
+                    grid: { drawOnChartArea: false },
+                    ticks: {
+                        callback: (val) => `$${val.toFixed(2)}`
+                    }
+                }
+            },
+            plugins: {
+                ...chartConfig.plugins,
+                tooltip: {
+                    ...chartConfig.plugins.tooltip,
+                    callbacks: {
+                        label: (context) => {
+                            const val = context.parsed.y;
+                            if (context.dataset.label.includes('Cost')) return `Cost: $${val.toLocaleString()}`;
+                            if (context.dataset.label.includes('Avg')) return `Avg Price: $${val.toFixed(3)}/gal`;
+                            return `Gallons: ${val.toLocaleString()} gal`;
+                        }
+                    }
+                }
+            }
+        }
+    });
+}
+
+/**
  * Create a Year-over-Year comparison chart
  */
 function createYoYComparisonChart(ctx, data, metricLabel) {

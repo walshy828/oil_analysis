@@ -385,11 +385,11 @@ async function renderDashboard(container) {
   d.setDate(d.getDate() - 90);
   const startStr = getLocalDateString(d);
 
-  const [summary, priceTrends, orderTrends, tempCorrelation, leadLag, latestPrices, crackSpread] = await Promise.all([
+  const [summary, priceTrends, orderInsights, tempCorrelation, leadLag, latestPrices, crackSpread] = await Promise.all([
     api.getDashboardSummary(),
     api.getPriceTrends(90),
-    api.getOrderTrends(12),
-    api.getTemperatureCorrelation(365),
+    api.getOrderInsights(),
+    api.getTemperatureCorrelation(),
     api.getLeadLagAnalysis(startStr, todayStr),
     api.getLatestPrices({ type: 'local' }),
     api.getCrackSpread(startStr, todayStr)
@@ -597,8 +597,8 @@ async function renderDashboard(container) {
       <div class="kpi-grid mb-lg">
         <div class="kpi-card">
           <div class="kpi-label">Current Low Price</div>
-          <div class="kpi-value mono">${summary.cheapest_vendor ? `$${summary.cheapest_vendor.price.toFixed(3)}` : 'N/A'}</div>
-          <div class="kpi-meta">${summary.cheapest_vendor?.name || 'No data'}</div>
+          <div class="kpi-value mono">${summary.latest_price ? `$${summary.latest_price.price.toFixed(3)}` : 'N/A'}</div>
+          <div class="kpi-meta">${summary.latest_price?.company || 'No data'}</div>
         </div>
         <div class="kpi-card">
           <div class="kpi-label">30-Day Average</div>
@@ -634,9 +634,10 @@ async function renderDashboard(container) {
         </div>
         <div class="card">
           <div class="card-header">
-            <h3 class="card-title">Order History</h3>
+            <h3 class="card-title">Long-Term Order Analysis</h3>
           </div>
           <div class="card-body">
+            <p class="text-xs text-secondary mb-md">Comparison of yearly gallons, total spend, and average price.</p>
             <div class="chart-container">
               <canvas id="order-chart"></canvas>
             </div>
@@ -663,9 +664,9 @@ async function renderDashboard(container) {
     storeChart('price-trend', createPriceTrendChart(priceCtx, priceTrends));
   }
 
-  if (orderTrends.orders?.length > 0) {
+  if (orderInsights && orderInsights.length > 0) {
     const orderCtx = document.getElementById('order-chart');
-    storeChart('order-chart', createOrderChart(orderCtx, orderTrends));
+    storeChart('order-chart', createYearlyOrderInsightChart(orderCtx, orderInsights));
   }
 
   const tempCtx = document.getElementById('temp-chart');
@@ -3918,15 +3919,56 @@ async function renderAnalyticsPage(container) {
                 </div>
             </div>
         </div>
+
+        <!-- Additional Trend Charts -->
+        <div class="analytics-charts-grid mt-lg">
+            <!-- Market Index Trends -->
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title flex items-center gap-sm">
+                        <span>Market Index Trends</span>
+                        <span class="info-tag" data-help="market-indices" title="Brent, WTI, Gasoline">?</span>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <p class="text-xs text-secondary mb-md">
+                        Global benchmarks for crude oil and refined gasoline.
+                    </p>
+                    <div class="chart-container" style="height: 280px;">
+                        <canvas id="marketIndexChart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- EIA Index Trends -->
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title flex items-center gap-sm">
+                        <span>EIA Spot Price Trends</span>
+                        <span class="info-tag" data-help="eia-indices" title="ULSD, WTI, Brent Spot">?</span>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <p class="text-xs text-secondary mb-md">
+                        Official EIA spot prices for key energy products.
+                    </p>
+                    <div class="chart-container" style="height: 280px;">
+                        <canvas id="eiaIndexChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
   `;
 
   try {
     // Fetch Data parallel
-    const [leadLag, rankings, crackSpread] = await Promise.all([
+    const [leadLag, rankings, crackSpread, marketTrends, eiaTrends] = await Promise.all([
       api.getLeadLagAnalysis(analyticsStartDate, analyticsEndDate, analyticsAggregation),
       api.getCompanyRankings(analyticsStartDate, analyticsEndDate),
-      api.getCrackSpread(analyticsStartDate, analyticsEndDate, analyticsAggregation)
+      api.getCrackSpread(analyticsStartDate, analyticsEndDate, analyticsAggregation),
+      api.getCompanyTrends([2, 3, 4], analyticsStartDate, analyticsEndDate, analyticsAggregation),
+      api.getCompanyTrends([5, 6, 7], analyticsStartDate, analyticsEndDate, analyticsAggregation)
     ]);
 
     // 1. Render Lead-Lag
@@ -3934,6 +3976,10 @@ async function renderAnalyticsPage(container) {
 
     // 2. Render Crack Spread
     renderCrackSpreadChart(crackSpread);
+
+    // 3. Render Trend Charts
+    renderMultiSeriesChart('marketIndexChart', 'marketIndex', marketTrends);
+    renderMultiSeriesChart('eiaIndexChart', 'eiaIndex', eiaTrends);
 
     // 4. Update Outlook and Trends
     const trends = leadLag.analysis.local_trends;
@@ -4005,6 +4051,41 @@ async function renderAnalyticsPage(container) {
 
   } catch (err) {
     showToast("Error loading analytics: " + err.message, "error");
+  }
+
+  // Fetch and Render Temperature Correlation for Analytics
+  try {
+    const tempCorrelation = await api.getTemperatureCorrelation(analyticsStartDate, analyticsEndDate);
+    const tempContainer = document.createElement('div');
+    tempContainer.className = 'card mt-lg';
+    tempContainer.innerHTML = `
+        <div class="card-header">
+            <h3 class="card-title">Temperature & Usage Correlation</h3>
+        </div>
+        <div class="card-body">
+            <div class="chart-container" style="height: 350px;">
+                <canvas id="analytics-temp-chart"></canvas>
+            </div>
+        </div>
+      `;
+    document.querySelector('.page-body').appendChild(tempContainer);
+
+    const tempCtx = document.getElementById('analytics-temp-chart');
+    if (tempCorrelation.temperatures?.labels?.length > 0) {
+      storeChart('analytics-temp', createTemperatureChart(tempCtx, tempCorrelation));
+    } else {
+      tempCtx.parentElement.innerHTML = `
+          <div class="empty-state" style="padding: var(--space-xl) 0;">
+              <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--text-tertiary); margin-bottom: var(--space-md);">
+                  <path d="M14 4v10.54a4 4 0 1 1-4 0V4a2 2 0 0 1 4 0Z"></path>
+              </svg>
+              <h3 class="empty-state-title">No Weather Data</h3>
+              <p class="empty-state-text">No data available for the selected period.</p>
+          </div>
+        `;
+    }
+  } catch (e) {
+    console.error("Failed to load analytics temperature correlation", e);
   }
 
   // Expert UX: Bind interactive help tags
@@ -4141,6 +4222,79 @@ function renderCrackSpreadChart(data) {
   }
 }
 
+function renderMultiSeriesChart(canvasId, chartKey, data) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+
+  if (typeof destroyChart === 'function') {
+    destroyChart(chartKey);
+  }
+
+  const colors = [
+    '#3b82f6', // Blue
+    '#f59e0b', // Amber
+    '#10b981', // Emerald
+    '#ef4444', // Red
+    '#8b5cf6', // Violet
+    '#ec4899'  // Pink
+  ];
+
+  const datasets = Object.keys(data.trends).map((cid, index) => {
+    const trend = data.trends[cid];
+    return {
+      label: trend.name,
+      data: data.dates.map(d => trend.data[d] || null),
+      borderColor: colors[index % colors.length],
+      backgroundColor: colors[index % colors.length] + '20',
+      tension: 0.3,
+      pointRadius: 0,
+      spanGaps: true
+    };
+  });
+
+  const chart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: data.dates,
+      datasets: datasets
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: {
+        mode: 'index',
+        intersect: false,
+      },
+      scales: {
+        x: {
+          type: 'time',
+          time: { unit: 'day' },
+          grid: { display: false }
+        },
+        y: {
+          display: true,
+          title: { display: true, text: 'Price ($)' }
+        }
+      },
+      plugins: {
+        legend: {
+          position: 'bottom',
+          labels: {
+            boxWidth: 12,
+            padding: 15,
+            font: { size: 11 }
+          }
+        }
+      }
+    }
+  });
+
+  if (typeof storeChart === 'function') {
+    storeChart(chartKey, chart);
+  }
+}
+
 function showExpertHelpModal(focusId = null) {
   document.getElementById('modal-title').textContent = 'Analytics Guide';
   document.getElementById('modal-body').innerHTML = `
@@ -4214,6 +4368,36 @@ function showExpertHelpModal(focusId = null) {
                   <span class="sentiment-good font-bold">Low/Falling:</span> Healthy supply conditions. Retailers have more room to offer discounts.
                 </div>
             </div>
+        </div>
+        </div>
+      </section>
+
+      <!-- Market Indices Explanation -->
+      <section class="insight-card ${focusId === 'market-indices' ? 'animate-pulse focus-shadow' : ''}" id="help-market-indices">
+        <div class="insight-header">
+            <span class="font-bold">Market Indices</span>
+            <span class="badge badge-info text-xs">Global Benchmarks</span>
+        </div>
+        <div class="insight-body">
+            <p class="text-sm">
+              <strong>What it shows:</strong> Brent and WTI Crude are global benchmarks for raw oil. RBOB Gasoline shows the price for refined motor fuel.
+            </p>
+            <p class="text-xs text-secondary mt-sm">
+              While heating oil is a different product, it strongly correlates with these global benchmarks.
+            </p>
+        </div>
+      </section>
+
+      <!-- EIA Indices Explanation -->
+      <section class="insight-card ${focusId === 'eia-indices' ? 'animate-pulse focus-shadow' : ''}" id="help-eia-indices">
+        <div class="insight-header">
+            <span class="font-bold">EIA Spot Prices</span>
+            <span class="badge badge-secondary text-xs">Official Data</span>
+        </div>
+        <div class="insight-body">
+            <p class="text-sm">
+              <strong>What it shows:</strong> Official spot prices from the Energy Information Administration (EIA). These are the "ground truth" for wholesale energy markets.
+            </p>
         </div>
       </section>
 
