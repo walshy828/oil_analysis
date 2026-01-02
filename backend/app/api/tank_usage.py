@@ -111,13 +111,24 @@ async def upload_tank_readings(
     text = content.decode('utf-8')
     
     reader = csv.DictReader(io.StringIO(text))
+    # Define allowed aliases
     
+    TIME_ALIASES = ['t', 'Time', 'timestamp']
+    GALLON_ALIASES = ['g', 'Gallons', 'volume']
     raw_readings = []
     for row in reader:
         try:
+            
+            # Helper to find the first matching key that exists in this row
+            ts_key = next((k for k in TIME_ALIASES if k in row), None)
+            val_key = next((k for k in GALLON_ALIASES if k in row), None)
+
+            if not ts_key or not val_key:
+                continue
+
             # Handle quoted timestamps
-            ts_str = row.get('t', '').strip('"')
-            gallons_str = row.get('g', '')
+            ts_str = row[ts_key].strip('"')
+            gallons_str = row[val_key]
             
             ts = datetime.strptime(ts_str, '%Y-%m-%d %H:%M:%S')
             gallons = float(gallons_str)
