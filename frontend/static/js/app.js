@@ -2342,29 +2342,10 @@ async function renderUsagePage(container) {
           </div>
         </div>
         
-        <div class="card">
-          <div class="card-header">
-            <h3 class="card-title">Usage vs Temperature</h3>
-          </div>
-          <div class="card-body">
-            <div class="flex gap-lg mb-md">
-              <div class="text-center">
-                <div class="text-2xl font-bold" id="correlation-value">--</div>
-                <div class="text-xs text-secondary">Correlation</div>
-              </div>
-              <div class="flex-1">
-                <div class="text-sm" id="correlation-text">Loading correlation data...</div>
-              </div>
-            </div>
-            <div class="chart-container" style="height: 180px;">
-              <canvas id="correlation-chart"></canvas>
-            </div>
-          </div>
-        </div>
       </div>
 
       <!-- Tank Level Chart -->
-      <div class="card">
+      <div class="card mb-lg">
         <div class="card-header">
           <h3 class="card-title">Tank Level History</h3>
           <label class="toggle-label" style="font-weight:normal; font-size: 13px;">
@@ -2375,6 +2356,18 @@ async function renderUsagePage(container) {
         <div class="card-body">
           <div class="chart-container" style="height: 250px;">
             <canvas id="tank-level-chart"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <!-- Detailed Usage Table -->
+      <div class="card">
+        <div class="card-header">
+          <h3 class="card-title">Usage History Details</h3>
+        </div>
+        <div class="card-body">
+          <div class="table-container" id="usage-detail-container">
+            <p class="text-secondary text-center p-lg">Loading details...</p>
           </div>
         </div>
       </div>
@@ -2879,11 +2872,14 @@ async function loadTankChart() {
             grid: { display: false }
           },
           y: {
-            title: { display: true, text: 'Gallons' }
+            title: { display: true, text: 'Gallons' },
+            min: 0
           }
         }
       }
     });
+
+    renderUsageDetailTable(readings);
   } catch (err) {
     console.error('Failed to load tank chart:', err);
   }
@@ -2908,6 +2904,95 @@ async function handleTankCsvUpload(input) {
   }
 
   input.value = '';
+}
+
+function renderUsageDetailTable(readings) {
+  const container = document.getElementById('usage-detail-container');
+  if (!container) return;
+
+  if (!readings || readings.length === 0) {
+    container.innerHTML = '<p class="text-secondary text-center p-lg">No usage data found for this period.</p>';
+    return;
+  }
+
+  // Sort descending for the table
+  const sorted = [...readings].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+
+  let html = `
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Date & Time</th>
+                    <th>Level</th>
+                    <th class="text-center">Trend</th>
+                    <th class="text-center">Interval</th>
+                    <th class="text-center">Burn Rate</th>
+                    <th class="text-right">Status</th>
+                </tr>
+            </thead>
+            <tbody>
+    `;
+
+  for (let i = 0; i < sorted.length; i++) {
+    const r = sorted[i];
+    const prev = i < sorted.length - 1 ? sorted[i + 1] : null;
+
+    let used = 0;
+    let intervalText = '-';
+    let burnRateText = '-';
+    let indicatorHtml = '<span class="text-muted">–</span>';
+
+    if (prev) {
+      const diffMs = new Date(r.timestamp) - new Date(prev.timestamp);
+      const diffHours = diffMs / (1000 * 60 * 60);
+
+      used = prev.gallons - r.gallons;
+
+      if (Math.abs(used) > 0.1) {
+        if (used > 0) {
+          const colorClass = used > 5 ? 'sentiment-bad' : 'sentiment-good';
+          indicatorHtml = `<span class="usage-pill ${colorClass}">-${used.toFixed(1)} gal</span>`;
+        } else {
+          indicatorHtml = `<span class="usage-pill sentiment-good">+${Math.abs(used).toFixed(1)} gal</span>`;
+        }
+      }
+
+      if (diffHours > 0) {
+        intervalText = diffHours < 1 ? `${(diffHours * 60).toFixed(0)}m` : `${diffHours.toFixed(1)}h`;
+        if (used > 0) {
+          const gph = used / diffHours;
+          burnRateText = `<span class="mono">${gph.toFixed(2)}</span> <span class="text-xs text-muted">gal/h</span>`;
+        }
+      }
+    }
+
+    let statusHtml = '';
+    if (r.is_fill_event) statusHtml = '<span class="badge bg-sentiment-good">FILL</span>';
+    else if (r.is_anomaly) statusHtml = '<span class="badge bg-sentiment-bad">ANOMALY</span>';
+    else if (r.is_post_fill_unstable) statusHtml = '<span class="badge bg-sentiment-warning">UNSTABLE</span>';
+    else statusHtml = '<span class="badge" style="background:var(--bg-tertiary); color:var(--text-secondary);">NORMAL</span>';
+
+    html += `
+            <tr>
+                <td class="text-sm">
+                    <div class="font-bold">${new Date(r.timestamp).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</div>
+                    <div class="text-xs text-secondary">${new Date(r.timestamp).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}</div>
+                </td>
+                <td class="mono font-bold text-lg">${r.gallons.toFixed(1)}<span class="text-xs text-secondary font-normal ml-xs">gal</span></td>
+                <td class="text-center">${indicatorHtml}</td>
+                <td class="text-center text-secondary text-sm">${intervalText}</td>
+                <td class="text-center">${burnRateText}</td>
+                <td class="text-right">${statusHtml}</td>
+            </tr>
+        `;
+  }
+
+  html += `
+            </tbody>
+        </table>
+    `;
+
+  container.innerHTML = html;
 }
 
 // ==================== Scrape Config Page ====================
@@ -4283,8 +4368,13 @@ function renderMultiSeriesChart(canvasId, chartKey, data) {
     '#ec4899'  // Pink
   ];
 
+  let hasSecondaryAxis = false;
+
   const datasets = Object.keys(data.trends).map((cid, index) => {
     const trend = data.trends[cid];
+    const isSecondary = trend.name.includes("RBOB Gasoline") || trend.name.includes("NY Harbor");
+    if (isSecondary) hasSecondaryAxis = true;
+
     return {
       label: trend.name,
       data: data.dates.map(d => trend.data[d] || null),
@@ -4292,7 +4382,8 @@ function renderMultiSeriesChart(canvasId, chartKey, data) {
       backgroundColor: colors[index % colors.length] + '20',
       tension: 0.3,
       pointRadius: 0,
-      spanGaps: true
+      spanGaps: true,
+      yAxisID: isSecondary ? 'y1' : 'y'
     };
   });
 
@@ -4317,16 +4408,32 @@ function renderMultiSeriesChart(canvasId, chartKey, data) {
         },
         y: {
           display: true,
-          title: { display: true, text: 'Price ($)' }
+          position: 'left',
+          title: {
+            display: true,
+            text: 'Price ($/bbl or $/gal)'
+          },
+          grid: { color: 'rgba(255, 255, 255, 0.05)' }
+        },
+        y1: {
+          display: hasSecondaryAxis,
+          position: 'right',
+          title: {
+            display: true,
+            text: 'RBOB & NY Harbor ($/gal)'
+          },
+          grid: { drawOnChartArea: false },
+          ticks: {
+            callback: (value) => `$${value.toFixed(2)}`
+          }
         }
       },
       plugins: {
-        legend: {
-          position: 'bottom',
-          labels: {
-            boxWidth: 12,
-            padding: 15,
-            font: { size: 11 }
+        ...chartConfig.plugins,
+        tooltip: {
+          ...chartConfig.plugins.tooltip,
+          callbacks: {
+            label: (context) => `${context.dataset.label}: $${context.parsed.y.toFixed(3)}`
           }
         }
       }
