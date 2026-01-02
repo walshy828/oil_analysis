@@ -414,25 +414,56 @@ async function renderDashboard(container) {
     const isStale = hoursSinceUpdate > 24;
 
     // Vendor Spread Visualization
-    const vendorDots = activePrices.map(p => {
+    // Vendor Spread Visualization
+    // Group prices to handle overlaps
+    const priceGroups = {};
+    activePrices.forEach(p => {
+      const priceKey = p.price_per_gallon.toFixed(3);
+      if (!priceGroups[priceKey]) priceGroups[priceKey] = [];
+      priceGroups[priceKey].push(p);
+    });
+
+    const vendorDots = Object.values(priceGroups).sort((a, b) => a[0].price_per_gallon - b[0].price_per_gallon).map(group => {
+      const p = group[0]; // Representative
+      const count = group.length;
+
       const pct = spread > 0 ? ((p.price_per_gallon - minPrice) / spread) * 100 : 0;
       const isCheapest = p.price_per_gallon === minPrice;
       const color = isCheapest ? 'var(--accent-success)' : 'rgba(255,255,255,0.4)';
       const zIndex = isCheapest ? 20 : 10;
-      const size = isCheapest ? 14 : 8;
 
-      // Smart Tooltip Layout Calculation
+      // Make dot slightly larger if it represents multiple vendors
+      let size = isCheapest ? 14 : 8;
+      if (count > 1 && !isCheapest) size = 10;
+      if (count > 1 && isCheapest) size = 16;
+
+      // Smart Tooltip Layout
       let tooltipClass = 'tooltip-center';
       if (pct < 20) tooltipClass = 'tooltip-left';
       else if (pct > 80) tooltipClass = 'tooltip-right';
 
-      // Format date
-      const dateObj = new Date(p.date_reported);
-      const dateStr = dateObj.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+      // Format date (use latest from group)
+      const dates = group.map(g => new Date(g.date_reported));
+      const maxDate = new Date(Math.max(...dates));
+      const dateStr = maxDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+
+      // Build Tooltip Text
+      let tooltipText;
+      const priceStr = `$${p.price_per_gallon.toFixed(3)}`;
+
+      if (count === 1) {
+        tooltipText = `${p.company_name}\n${priceStr} • ${dateStr}`;
+      } else {
+        // List up to 3 names, then "+ X others"
+        const names = group.map(g => g.company_name);
+        let nameStr = names.slice(0, 3).join(', ');
+        if (names.length > 3) nameStr += ` (+${names.length - 3} others)`;
+        tooltipText = `${count} Vendors @ ${priceStr}\n${nameStr}\n${dateStr}`;
+      }
 
       return `<div class="vendor-dot ${tooltipClass}" 
                   style="left:${pct}%; background:${color}; z-index:${zIndex}; width:${size}px; height:${size}px;"
-                  data-tooltip="${p.company_name}\n$${p.price_per_gallon.toFixed(3)} • ${dateStr}"></div>`;
+                  data-tooltip="${tooltipText}"></div>`;
     }).join('');
 
     // --- Advanced Prediction Logic ---
