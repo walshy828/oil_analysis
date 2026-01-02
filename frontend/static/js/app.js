@@ -4461,6 +4461,27 @@ function showExpertHelpModal(focusId = null) {
             </div>
         </div>
       </section>
+
+       <!-- HDD Explanation -->
+      <section class="insight-card">
+        <div class="insight-header">
+            <span class="font-bold">Heating Degree Days (HDD)</span>
+            <span class="badge badge-info text-xs">Weather Indicator</span>
+        </div>
+        <div class="insight-body">
+            <p class="text-sm mb-sm">
+              HDD is based on a "base temperature"—the outdoor temperature at which a building generally requires no artificial heating. In the United States, this standard base is 65°F (18°C)
+            </p>
+            <p class="text-sm mb-sm">
+              HDD= Base Temperature (65F) - Daily Mean Temperature
+            </p>
+            <div class="text-sm text-secondary" style="line-height: 1.6;">
+              • <strong>Step 1:</strong> Calculate the daily mean temperature: 6$\frac{\text{High} + \text{Low}}{2}$<br>
+              • <strong>Step 2:</strong> If the mean is below 65°F, subtract it from 65. The result is your HDD for that day.<br>
+              • <strong>Step 3:</strong> If the mean is 65°F or higher, the HDD for that day is zero
+            </div>
+        </div>
+      </section>
     </div>
   `;
   const confirmBtn = document.getElementById('modal-confirm');
