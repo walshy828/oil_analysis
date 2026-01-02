@@ -193,7 +193,7 @@ async function renderYoYPage(container) {
   const priceDiff = avgPrice - prevAvgPrice;
 
   // Build year options
-  const yearOptions = [0, 1, 2, 3, 4].map(i => {
+  const yearOptions = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(i => {
     const y = new Date().getFullYear() - i;
     return { value: y.toString(), label: y.toString(), selected: y === yoyYear };
   });
