@@ -58,7 +58,9 @@ def _find_or_create_company(db: Session, name: str, website: str) -> Company:
 @router.post("/yahoo-finance")
 async def import_yahoo_historical(
     symbol: str = Query(..., description="Symbol key: ulsd, brent, wti, gasoline"),
-    days: int = Query(365, description="Number of days of history to import"),
+    days: Optional[int] = Query(None, description="Number of days of history to import"),
+    start_date: Optional[date] = Query(None, description="Custom start date"),
+    end_date: Optional[date] = Query(None, description="Custom end date"),
     db: Session = Depends(get_db)
 ):
     """
@@ -72,8 +74,17 @@ async def import_yahoo_historical(
     yahoo_symbol = info["symbol"]
     
     # Calculate time range
-    end_time = int(datetime.now().timestamp())
-    start_time = int((datetime.now() - timedelta(days=days)).timestamp())
+    if start_date and end_date:
+        # Convert date to timestamp (Yahoo wants seconds)
+        start_time = int(datetime.combine(start_date, datetime.min.time()).timestamp())
+        end_time = int(datetime.combine(end_date, datetime.max.time()).timestamp())
+    elif days:
+        end_time = int(datetime.now().timestamp())
+        start_time = int((datetime.now() - timedelta(days=days)).timestamp())
+    else:
+        # Default to 365 days if nothing provided
+        end_time = int(datetime.now().timestamp())
+        start_time = int((datetime.now() - timedelta(days=365)).timestamp())
     
     url = YAHOO_CHART_URL.format(symbol=yahoo_symbol)
     params = {

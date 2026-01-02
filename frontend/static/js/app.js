@@ -2984,14 +2984,19 @@ async function renderScrapePage(container) {
                   <option value="wti">WTI Crude (CL=F)</option>
                   <option value="gasoline">RBOB Gasoline (RB=F)</option>
                 </select>
-                <select id="yahoo-days" class="form-select" style="width: 120px;">
+                <select id="yahoo-days" class="form-select" style="width: 120px;" onchange="toggleYahooCustomRange()">
                   <option value="30">30 days</option>
                   <option value="90">90 days</option>
                   <option value="180">6 months</option>
                   <option value="365" selected>1 year</option>
                   <option value="730">2 years</option>
                   <option value="1825">5 years</option>
+                  <option value="custom">Custom</option>
                 </select>
+              </div>
+              <div id="yahoo-custom-range" class="flex gap-sm mb-sm" style="display: none;">
+                <input type="date" id="yahoo-start" class="form-input flex-1" style="font-size: 11px;">
+                <input type="date" id="yahoo-end" class="form-input flex-1" style="font-size: 11px;">
               </div>
               <button class="btn btn-primary btn-sm" onclick="importYahooData()">Import from Yahoo</button>
             </div>
@@ -3180,14 +3185,37 @@ function updateHistoryFilter(key, value) {
 
 async function importYahooData() {
   const symbol = document.getElementById('yahoo-symbol').value;
-  const days = parseInt(document.getElementById('yahoo-days').value);
+  const daysValue = document.getElementById('yahoo-days').value;
+
+  let days = null;
+  let startDate = null;
+  let endDate = null;
+
+  if (daysValue === 'custom') {
+    startDate = document.getElementById('yahoo-start').value;
+    endDate = document.getElementById('yahoo-end').value;
+    if (!startDate || !endDate) {
+      showToast('Please select both start and end dates', 'warning');
+      return;
+    }
+  } else {
+    days = parseInt(daysValue);
+  }
 
   try {
     showToast('Importing from Yahoo Finance...', 'info');
-    const result = await api.importYahooHistorical(symbol, days);
+    const result = await api.importYahooHistorical(symbol, days, startDate, endDate);
     showToast(`Imported: ${result.created} records (${result.skipped} duplicates skipped)`, 'success');
   } catch (err) {
     showToast('Import failed: ' + err.message, 'error');
+  }
+}
+
+function toggleYahooCustomRange() {
+  const val = document.getElementById('yahoo-days').value;
+  const customDiv = document.getElementById('yahoo-custom-range');
+  if (customDiv) {
+    customDiv.style.display = val === 'custom' ? 'flex' : 'none';
   }
 }
 

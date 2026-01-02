@@ -391,8 +391,12 @@ class ApiClient {
     return this.request('/import/available-symbols');
   }
 
-  async importYahooHistorical(symbol, days = 365) {
-    return this.request(`/import/yahoo-finance?symbol=${symbol}&days=${days}`, { method: 'POST' });
+  async importYahooHistorical(symbol, days = null, startDate = null, endDate = null) {
+    let url = `/import/yahoo-finance?symbol=${symbol}`;
+    if (days) url += `&days=${days}`;
+    if (startDate) url += `&start_date=${startDate}`;
+    if (endDate) url += `&end_date=${endDate}`;
+    return this.request(url, { method: 'POST' });
   }
 
   async importEiaHistorical(series, apiKey, startDate, endDate) {
