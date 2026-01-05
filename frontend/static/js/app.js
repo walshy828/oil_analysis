@@ -755,7 +755,7 @@ async function renderPricesPage(container) {
           {
             type: 'toggle',
             id: 'toggle-latest-scrape',
-            label: 'Latest Only',
+            label: 'Latest Batch',
             checked: showLatestScrapeOnly,
             onchange: 'toggleLatestScrape()'
           },
@@ -769,9 +769,34 @@ async function renderPricesPage(container) {
           {
             type: 'toggle',
             id: 'toggle-history',
-            label: 'History',
+            label: 'Show History',
             checked: false,
             onchange: 'togglePriceHistory()'
+          }
+        ]
+      },
+      {
+        label: 'Sort By',
+        items: [
+          {
+            type: 'select',
+            id: 'price-sort-by',
+            onchange: 'loadPrices(getCurrentFilters())',
+            options: [
+              { value: 'price', label: 'Price', selected: true },
+              { value: 'name', label: 'Company' },
+              { value: 'date', label: 'Reported Date' },
+              { value: 'scraped_at', label: 'Snapshot Time' }
+            ]
+          },
+          {
+            type: 'select',
+            id: 'price-sort-order',
+            onchange: 'loadPrices(getCurrentFilters())',
+            options: [
+              { value: 'asc', label: 'Ascending', selected: true },
+              { value: 'desc', label: 'Descending' }
+            ]
           }
         ]
       }
@@ -849,27 +874,15 @@ async function renderPricesPage(container) {
 async function loadPrices(filters = {}) {
   try {
     const showHistory = document.getElementById('toggle-history')?.checked;
-    // Ensure type is in filters if not passed explicitly (though loadPrices is usually called with getCurrentFilters)
+    const sortBy = document.getElementById('price-sort-by')?.value || 'price';
+    const sortOrder = document.getElementById('price-sort-order')?.value || 'asc';
+
+    // Ensure type is in filters
     if (!filters.type) filters.type = viewType;
+    filters.sort_by = sortBy;
+    filters.order = sortOrder;
 
     let rawData = showHistory ? await api.getOilPrices(filters) : await api.getLatestPrices(filters);
-
-    if (showLatestScrapeOnly && rawData.length > 0) {
-      let maxScrapeTime = "";
-      rawData.forEach(p => {
-        if (p.scraped_at && p.scraped_at > maxScrapeTime) maxScrapeTime = p.scraped_at;
-      });
-
-      if (maxScrapeTime) {
-        const maxDate = new Date(maxScrapeTime);
-        // 15 minute tolerance window for a single scrape batch
-        const windowMs = 15 * 60 * 1000;
-        rawData = rawData.filter(p => {
-          if (!p.scraped_at) return false;
-          return (maxDate - new Date(p.scraped_at)) < windowMs;
-        });
-      }
-    }
 
     currentPricesData = rawData;
     selectedPrices.clear();

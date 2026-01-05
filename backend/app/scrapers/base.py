@@ -10,7 +10,7 @@ class BaseScraper(ABC):
         self.url = url
     
     @abstractmethod
-    async def scrape(self, db: Session) -> List[Dict[str, Any]]:
+    async def scrape(self, db: Session, snapshot_id: str = None, scraped_at: datetime = None) -> List[Dict[str, Any]]:
         """
         Scrape data from the configured URL.
         

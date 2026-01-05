@@ -29,12 +29,13 @@ class EiaSpotPriceScraper(BaseScraper):
     def get_description(cls) -> str:
         return "Fetches daily spot prices (WTI, Brent, ULSD) from EIA.gov API"
     
-    async def scrape(self, db: Session) -> List[Dict[str, Any]]:
+    async def scrape(self, db: Session, snapshot_id: str = None, scraped_at: datetime = None) -> List[Dict[str, Any]]:
         if not settings.eia_api_key:
             print("EIA_API_KEY not configured. Skipping EIA scraper.")
             return []
             
         records = []
+        scrape_ts = scraped_at or datetime.utcnow()
         
         async with httpx.AsyncClient() as client:
             for series_id, internal_name in self.SERIES.items():
@@ -84,7 +85,9 @@ class EiaSpotPriceScraper(BaseScraper):
                             company_id=company.id,
                             price_per_gallon=price,
                             town="EIA Spot / Global",
-                            date_reported=price_date
+                            date_reported=price_date,
+                            scraped_at=scrape_ts,
+                            snapshot_id=snapshot_id
                         )
                         db.add(oil_price)
                         

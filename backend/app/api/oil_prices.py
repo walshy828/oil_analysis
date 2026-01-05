@@ -81,28 +81,47 @@ async def list_oil_prices(
 @router.get("/latest")
 async def get_latest_prices(
     type: str = Query("local", regex="^(local|market|all)$"),
+    sort_by: str = Query("price", regex="^(price|name|date)$"),
+    order: str = Query("asc", regex="^(asc|desc)$"),
     db: Session = Depends(get_db)
 ):
     """Get the most recent price snapshot for every company."""
     from sqlalchemy import text, func
-    from sqlalchemy.orm import joinedload
     
-    # 1. Get the absolute latest scrape timestamp
-    latest_ts = db.query(func.max(OilPrice.scraped_at)).scalar()
+    # 1. Identify the latest successful batch
+    # We first try to find the latest NOT NULL snapshot_id
+    latest_snapshot = db.query(OilPrice.snapshot_id).filter(
+        OilPrice.snapshot_id.isnot(None)
+    ).order_by(desc(OilPrice.scraped_at)).first()
+    
+    latest_ts = None
+    if latest_snapshot:
+        latest_snapshot_id = latest_snapshot[0]
+        # Get the timestamp for this snapshot as well to handle fallbacks
+        latest_ts = db.query(OilPrice.scraped_at).filter(
+            OilPrice.snapshot_id == latest_snapshot_id
+        ).limit(1).scalar()
+    else:
+        # Fallback to absolute latest timestamp if no snapshot IDs exist (old data)
+        latest_snapshot_id = None
+        latest_ts = db.query(func.max(OilPrice.scraped_at)).scalar()
     
     # 2. Build query
-    # Use raw SQL. If we have a latest_ts, filter by it strictly.
-    # Otherwise, fallback to DISTINCT ON behavior (though without scraped_at, likely manual data).
-    
     where_clause = "WHERE c.merged_into_id IS NULL AND (:type = 'all' OR (:type = 'local' AND c.is_market_index = false) OR (:type = 'market' AND c.is_market_index = true))"
     
     params = {"type": type}
     
-    if latest_ts:
-        where_clause += " AND p.scraped_at = :latest_ts"
-        params["latest_ts"] = latest_ts
+    if latest_snapshot_id:
+        where_clause += " AND p.snapshot_id = :snapshot_id"
+        params["snapshot_id"] = latest_snapshot_id
+    elif latest_ts:
+        # Fallback: find records within 1 minute of latest_ts to handle slightly staggered old scrapes
+        where_clause += " AND p.scraped_at >= :ts_start AND p.scraped_at <= :ts_end"
+        from datetime import timedelta
+        params["ts_start"] = latest_ts - timedelta(minutes=1)
+        params["ts_end"] = latest_ts + timedelta(minutes=1)
         
-    query = text(f"""
+    query_text = f"""
         SELECT DISTINCT ON (p.company_id)
             p.id, 
             p.company_id, 
@@ -112,17 +131,18 @@ async def get_latest_prices(
             p.price_per_gallon,
             p.town,
             p.date_reported,
-            p.scraped_at
+            p.scraped_at,
+            p.snapshot_id
         FROM oil_prices p
         JOIN companies c ON p.company_id = c.id
         {where_clause}
         ORDER BY p.company_id, p.scraped_at DESC
-    """)
+    """
     
-    result = db.execute(query, params)
+    result = db.execute(text(query_text), params)
     rows = result.fetchall()
     
-    # Build response with aliases
+    # Build response
     response = []
     for row in rows:
         # Fetch aliases for this company
@@ -140,11 +160,20 @@ async def get_latest_prices(
             "town": row.town,
             "date_reported": row.date_reported.isoformat() if row.date_reported else None,
             "scraped_at": (row.scraped_at.isoformat() + "Z") if row.scraped_at else None,
+            "snapshot_id": row.snapshot_id,
             "aliases": [{"id": a.id, "alias_name": a.alias_name} for a in aliases]
         })
     
-    # Sort by price
-    response.sort(key=lambda x: x["price_per_gallon"])
+    # Apply Sorting
+    reverse = (order == "desc")
+    if sort_by == "price":
+        response.sort(key=lambda x: x["price_per_gallon"], reverse=reverse)
+    elif sort_by == "name":
+        response.sort(key=lambda x: x["company_name"].lower(), reverse=reverse)
+    elif sort_by == "date":
+        response.sort(key=lambda x: x["date_reported"] or "", reverse=reverse)
+    elif sort_by == "scraped_at":
+        response.sort(key=lambda x: x["scraped_at"] or "", reverse=reverse)
     
     return response
 

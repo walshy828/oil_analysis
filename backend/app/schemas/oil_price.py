@@ -18,6 +18,7 @@ class OilPriceCreate(OilPriceBase):
 class OilPriceResponse(OilPriceBase):
     id: int
     scraped_at: datetime
+    snapshot_id: Optional[str] = None
     company_name: Optional[str] = None
 
     @field_serializer('scraped_at')

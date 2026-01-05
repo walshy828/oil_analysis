@@ -17,7 +17,7 @@ class WeatherScraper(BaseScraper):
     def get_scraper_type(cls) -> str:
         return "weather"
     
-    async def scrape(self, db: Session) -> list:
+    async def scrape(self, db: Session, snapshot_id: str = None, scraped_at: datetime = None) -> list:
         # Get all locations with valid coordinates
         locations = db.query(Location).filter(
             Location.latitude.isnot(None), 

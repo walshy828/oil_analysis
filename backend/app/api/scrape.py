@@ -85,12 +85,17 @@ async def run_scraper_task(config_id: int, db: Session):
     db.commit()
     db.refresh(history)
     
+    # Generate snapshot metadata
+    import uuid
+    snapshot_id = str(uuid.uuid4())
+    scrape_ts = datetime.utcnow()
+    
     try:
         # Get the appropriate scraper
         scraper = get_scraper(config.scraper_type, config.url)
         
-        # Run the scraper
-        records = await scraper.scrape(db)
+        # Run the scraper with snapshot metadata
+        records = await scraper.scrape(db, snapshot_id=snapshot_id, scraped_at=scrape_ts)
         
         # Update history
         history.status = "success"
@@ -98,7 +103,7 @@ async def run_scraper_task(config_id: int, db: Session):
         history.completed_at = datetime.utcnow()
         
         # Update config last run
-        config.last_run = datetime.utcnow()
+        config.last_run = scrape_ts
         
     except Exception as e:
         history.status = "failed"

@@ -13,6 +13,7 @@ class OilPrice(Base):
     town = Column(String(255), nullable=True)
     date_reported = Column(Date, nullable=False, index=True)
     scraped_at = Column(DateTime, default=datetime.utcnow, index=True)
+    snapshot_id = Column(String(255), nullable=True, index=True)
 
     # Relationships
     company = relationship("Company", back_populates="oil_prices")

@@ -34,9 +34,10 @@ class MarketCommoditiesScraper(BaseScraper):
     def get_description(cls) -> str:
         return "Scrapes NY Harbor ULSD and Brent Crude prices from Yahoo Finance"
     
-    async def scrape(self, db: Session) -> List[Dict[str, Any]]:
+    async def scrape(self, db: Session, snapshot_id: str = None, scraped_at: datetime = None) -> List[Dict[str, Any]]:
         """Scrape market prices."""
         records = []
+        scrape_ts = scraped_at or datetime.utcnow()
         
         # Determine strict targets from the configured URL or default to all
         # If the user provides a specific Yahoo URL, we might infer, but 
@@ -95,7 +96,9 @@ class MarketCommoditiesScraper(BaseScraper):
                         company_id=company.id,
                         price_per_gallon=price,
                         town="NYMEX / Global",
-                        date_reported=date.today()
+                        date_reported=date.today(),
+                        scraped_at=scrape_ts,
+                        snapshot_id=snapshot_id
                     )
                     db.add(oil_price)
                     

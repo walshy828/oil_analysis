@@ -24,9 +24,12 @@ class NewEnglandOilScraper(BaseScraper):
     def get_description(cls) -> str:
         return "Scrapes heating oil prices from New England Oil website"
     
-    async def scrape(self, db: Session) -> List[Dict[str, Any]]:
+    async def scrape(self, db: Session, snapshot_id: str = None, scraped_at: datetime = None) -> List[Dict[str, Any]]:
         """Scrape oil prices from New England Oil website."""
         records = []
+        
+        # Use provided timestamp or current time
+        scrape_ts = scraped_at or datetime.utcnow()
         
         async with httpx.AsyncClient() as client:
             response = await client.get(self.url, timeout=30.0)
@@ -128,7 +131,9 @@ class NewEnglandOilScraper(BaseScraper):
                     company_id=company.id,
                     price_per_gallon=price,
                     town=town,
-                    date_reported=date_reported
+                    date_reported=date_reported,
+                    scraped_at=scrape_ts,
+                    snapshot_id=snapshot_id
                 )
                 db.add(oil_price)
                 
@@ -157,7 +162,9 @@ class NewEnglandOilScraper(BaseScraper):
                         oil_price = OilPrice(
                             company_id=company.id,
                             price_per_gallon=price,
-                            date_reported=date.today()
+                            date_reported=date.today(),
+                            scraped_at=scrape_ts,
+                            snapshot_id=snapshot_id
                         )
                         db.add(oil_price)
                         
