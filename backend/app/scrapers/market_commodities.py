@@ -1,7 +1,7 @@
 import httpx
 from bs4 import BeautifulSoup
 from typing import List, Dict, Any
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 import re
 from sqlalchemy.orm import Session

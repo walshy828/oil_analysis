@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any
 from sqlalchemy.orm import Session
+from datetime import datetime
 
 
 class BaseScraper(ABC):

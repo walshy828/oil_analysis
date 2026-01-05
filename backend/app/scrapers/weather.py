@@ -1,4 +1,4 @@
-from datetime import date, timedelta
+from datetime import date, timedelta, datetime
 import httpx
 from sqlalchemy.orm import Session
 from app.models import Location, Temperature

@@ -1,6 +1,6 @@
 import httpx
 from typing import List, Dict, Any
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from sqlalchemy.orm import Session
 

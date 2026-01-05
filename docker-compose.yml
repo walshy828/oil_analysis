@@ -43,7 +43,7 @@ services:
     ports:
       - "8028:8028"
     volumes:
-      - ./backend/app:/app/app
+      - ./backend:/app
     depends_on:
       redis:
         condition: service_healthy
@@ -69,7 +69,7 @@ services:
       REDIS_URL: redis://redis:6379/0
       EIA_API_KEY: ${EIA_API_KEY}
     volumes:
-      - ./backend/app:/app/app
+      - ./backend:/app
     depends_on:
       redis:
         condition: service_healthy
@@ -86,7 +86,7 @@ services:
       dockerfile: Dockerfile
     container_name: oil_prices_frontend
     ports:
-      - "80888:80"
+      - "8088:80"
     depends_on:
       - backend
     restart: unless-stopped
@@ -97,4 +97,5 @@ services:
         max-file: "3"
 
 volumes:
+  postgres_data:
   redis_data:
