@@ -428,7 +428,7 @@ async function renderDashboard(container) {
     const prices = activePrices.map(p => p.price_per_gallon);
     const minPrice = Math.min(...prices);
     const maxPrice = Math.max(...prices);
-    const avgPrice = prices.reduce((a, b) => a + b, 0) / prices.length;
+    const avgPrice = prices.length > 0 ? prices.reduce((a, b) => a + b, 0) / prices.length : 0;
     const spread = maxPrice - minPrice;
 
     // Stale Data Check (24 hours)
@@ -490,56 +490,32 @@ async function renderDashboard(container) {
                   data-tooltip="${tooltipText}"></div>`;
     }).join('');
 
-    // --- Advanced Prediction Logic ---
-    const trend7d = leadLag.analysis?.local_trends?.['7d'] || 0;
-    const predictedDir = leadLag.prediction?.direction || (trend7d > 0 ? 'UP' : 'DOWN');
-    const isPredictedUp = predictedDir === 'UP';
-    const spreadTrend = crackSpread.analysis?.trend_direction || 'neutral';
+    // --- Expert Prediction Logic ---
+    const predictionText = leadLag.analysis?.prediction || 'Stable';
+    const isPredictedUp = predictionText.includes('Rise') || predictionText.includes('Upward');
+    const isPredictedDown = predictionText.includes('Fall') || predictionText.includes('Downward');
 
-    // Best Action Insight
-    const isPriceLow = minPrice <= (summary.avg_price_30d * 0.98); // 2% below 30d avg
-    const needsOil = summary.days_since_delivery > 60;
+    const trendLabel = isPredictedUp ? 'Trending Up' : isPredictedDown ? 'Trending Down' : 'Stable';
+    const trendIcon = isPredictedUp ? '↗' : isPredictedDown ? '↘' : '→';
+    const trendClass = isPredictedUp ? 'sentiment-bad' : isPredictedDown ? 'sentiment-good' : 'text-secondary';
 
-    if (isPriceLow && !isPredictedUp) {
-      insightBanner = `
-        <div class="alert animate-fade-in" style="background: rgba(74, 222, 128, 0.1); border: 1px solid var(--accent-success); color: var(--accent-success); margin-bottom: var(--space-lg); display: flex; align-items: center; gap: var(--space-md);">
-          <div style="font-size: 1.5rem;">✨</div>
-          <div>
-            <div class="font-bold">Excellent Buying Opportunity</div>
-            <div class="text-sm">Prices are at a 30-day low and trending ${predictedDir.toLowerCase()}. Consider ordering now.</div>
-          </div>
-          <button class="btn btn-sm btn-success ml-auto" onclick="showAddOrderModal()">Add Order</button>
-        </div>
-      `;
-    } else if (isStale) {
-      insightBanner = `
-        <div class="alert animate-fade-in" style="background: rgba(251, 191, 36, 0.1); border: 1px solid var(--accent-warning); color: var(--accent-warning); margin-bottom: var(--space-lg); display: flex; align-items: center; gap: var(--space-md);">
-          <div style="font-size: 1.5rem;">⚠️</div>
-          <div>
-            <div class="font-bold">Data is Stale</div>
-            <div class="text-sm">Market data hasn't been updated in over 24 hours. Refresh for the latest prices.</div>
-          </div>
-          <button class="btn btn-sm btn-warning ml-auto" onclick="runQuickScrape()">Refresh Now</button>
-        </div>
-      `;
-    }
+    // --- Crack Spread Extraction ---
+    const latestCrack = (Array.isArray(crackSpread) && crackSpread.length > 0) ? crackSpread[crackSpread.length - 1] : null;
+    const crackSpreadVal = latestCrack ? latestCrack.spread : 0;
+    const crackSpreadTrend = crackSpread.analysis?.trend_direction || (latestCrack && crackSpread.length > 1 && latestCrack.spread > crackSpread[0].spread ? 'widening' : 'stable');
 
-    let biasText = '';
-    if (spreadTrend === 'widening') biasText = ' and widening refinery margins';
-    if (spreadTrend === 'narrowing') biasText = ' despite narrowing refinery margins';
-
-    const trendLabel = isPredictedUp ? 'Trending Up' : 'Trending Down';
-    const trendIcon = isPredictedUp ? '↗' : '↘';
-    const trendClass = isPredictedUp ? 'sentiment-bad' : 'sentiment-good';
+    // --- Buy/Wait Recommendation ---
+    const isPriceLow = minPrice <= (summary.avg_price_30d * 1.01); // 1% range of 30d avg
+    const lagDays = leadLag.analysis?.optimal_lag || 0;
     const cheapestVendor = activePrices.find(p => p.price_per_gallon === minPrice);
 
     snapshotHtml = `
-      <div class="card mb-lg animate-fade-in glass-effect" style="border-left: 4px solid ${isPredictedUp ? 'var(--accent-error)' : 'var(--accent-success)'};">
-        <div class="card-header border-0 pb-0" style="border-bottom: none;">
+      <div class="card mb-lg animate-fade-in glass-effect" style="border-left: 4px solid ${isPredictedUp ? 'var(--accent-error)' : isPredictedDown ? 'var(--accent-success)' : 'var(--border-primary)'};">
+        <div class="card-header border-0 pb-0">
              <div class="flex flex-between align-center w-full">
-                <h3 class="card-title">Market Snapshot & Vendor Spread</h3>
+                <h3 class="card-title">Economic Indicators & Market Intel</h3>
                 <div class="flex gap-sm align-center">
-                    ${isStale ? `<span class="badge bg-warning text-dark flex items-center gap-xs" style="background:var(--accent-warning); color:#000;">
+                    ${isStale ? `<span class="badge bg-warning text-dark flex items-center gap-xs">
                         <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
                         DATA STALE
                     </span>` : ''}
@@ -551,71 +527,71 @@ async function renderDashboard(container) {
              </div>
         </div>
         <div class="card-body">
-           ${isStale ? `
-           <div class="alert alert-warning mb-md flex flex-between align-center" style="background: rgba(251, 191, 36, 0.1); border: 1px solid rgba(251, 191, 36, 0.3); color: var(--accent-warning);">
-              <span>Local market data is ${hoursSinceUpdate.toFixed(0)} hours old.</span>
-              <button class="btn btn-sm btn-outline-warning" onclick="runQuickScrape()">Refresh Now</button>
-           </div>` : ''}
+           <div class="grid grid-3 gap-lg mb-lg mobile-grid-1">
+             <div class="flex flex-column gap-md">
+                 <div class="text-xs text-secondary uppercase tracking-widest font-bold">Refinery Margin (Crack Spread)</div>
+                 <div class="flex align-baseline gap-sm">
+                    <span class="text-2xl font-mono">$${crackSpreadVal.toFixed(2)}</span>
+                    <span class="text-xs ${crackSpreadTrend === 'widening' ? 'text-error' : 'text-success'}">
+                        ${crackSpreadTrend === 'widening' ? '↑ Increasing Pressure' : '↓ Easing Price Pressure'}
+                    </span>
+                 </div>
+                 <p class="text-xs text-secondary">The "3:2:1" crack spread measures refinery profit. Rising spreads usually signal upcoming retail price hikes.</p>
+             </div>
+
+             <div class="flex flex-column gap-md">
+                 <div class="text-xs text-secondary uppercase tracking-widest font-bold">Supply Chain Lag</div>
+                 <div class="flex align-baseline gap-sm">
+                    <span class="text-2xl font-mono">${lagDays} Days</span>
+                 </div>
+                 <p class="text-xs text-secondary">Local price updates typically lag national ULSD commodity moves by about ${lagDays} business days.</p>
+             </div>
+
+             <div class="flex flex-column gap-md">
+                 <div class="text-xs text-secondary uppercase tracking-widest font-bold">Expert Action</div>
+                 <div class="p-sm rounded" style="background: ${isPredictedUp ? 'rgba(239, 68, 68, 0.1)' : isPredictedDown || isPriceLow ? 'rgba(74, 222, 128, 0.1)' : 'var(--bg-tertiary)'}; border: 1px solid ${isPredictedUp ? 'var(--accent-error)' : isPredictedDown || isPriceLow ? 'var(--accent-success)' : 'var(--border-primary)'}">
+                    <div class="text-sm font-bold ${isPredictedUp ? 'text-error' : isPredictedDown || isPriceLow ? 'text-success' : 'text-primary'}">
+                        ${isPredictedUp ? 'ORDER NOW' : isPredictedDown ? 'WAIT' : isPriceLow ? 'REFILL NOW' : 'MONITOR'}
+                    </div>
+                    <p class="text-xs text-secondary" style="margin-top:2px;">
+                        ${isPredictedUp ? 'Leading signals suggest immediate price increases.' : isPredictedDown ? 'Downward pressure detected; wait for further drops.' : isPriceLow ? 'Competitive market price detected.' : 'No significant market signals detected.'}
+                    </p>
+                 </div>
+             </div>
+           </div>
 
            <div class="flex flex-column gap-lg">
-             <!-- Metrics Grid -->
              <div class="grid grid-3 gap-md mobile-grid-1">
-                 <!-- Lowest -->
-                 <div class="p-md rounded" style="background: var(--bg-secondary);">
-                     <div class="text-xs text-secondary uppercase tracking-wider mb-xs">Lowest Price</div>
-                     <div class="flex align-baseline gap-xs">
-                       <span class="text-2xl font-bold font-mono text-success">$${minPrice.toFixed(3)}</span>
-                     </div>
-                     <div class="text-sm text-secondary truncate" title="${cheapestVendor?.company_name}">${cheapestVendor?.company_name}</div>
+                 <div class="p-md rounded bg-secondary-alt border-primary">
+                     <div class="text-xs text-secondary uppercase tracking-wider mb-xs">Lowest Local Price</div>
+                     <div class="text-2xl font-bold font-mono text-success">$${minPrice.toFixed(3)}</div>
+                     <div class="text-xs text-secondary truncate mt-xs" title="${cheapestVendor?.company_name || ''}">${cheapestVendor?.company_name || 'N/A'}</div>
                  </div>
-                 <!-- Average -->
-                 <div class="p-md rounded" style="background: var(--bg-secondary);">
+                 <div class="p-md rounded bg-secondary-alt border-primary">
                      <div class="text-xs text-secondary uppercase tracking-wider mb-xs">Market Average</div>
-                     <div class="flex align-baseline gap-xs">
-                       <span class="text-2xl font-bold font-mono">$${avgPrice.toFixed(3)}</span>
-                     </div>
-                     <div class="text-sm text-secondary">
-                        <span class="${avgPrice > minPrice ? 'text-error' : 'text-success'}">+${(avgPrice - minPrice).toFixed(2)} vs Low</span>
+                     <div class="text-2xl font-bold font-mono">$${avgPrice.toFixed(3)}</div>
+                     <div class="text-xs ${avgPrice > minPrice ? 'text-error' : 'text-success'} mt-xs">
+                        ${avgPrice > minPrice ? `+$${(avgPrice - minPrice).toFixed(3)} Above Best Price` : 'Leading Market Price'}
                      </div>
                  </div>
-                 <!-- Spread -->
-                 <div class="p-md rounded" style="background: var(--bg-secondary);">
-                      <div class="text-xs text-secondary uppercase tracking-wider mb-xs">Spread</div>
-                      <div class="flex align-baseline gap-xs">
-                        <span class="text-2xl font-bold font-mono">$${spread.toFixed(2)}</span>
-                      </div>
-                      <div class="text-sm text-secondary">High: $${maxPrice.toFixed(3)}</div>
+                 <div class="p-md rounded bg-secondary-alt border-primary">
+                      <div class="text-xs text-secondary uppercase tracking-wider mb-xs">Vendor Spread</div>
+                      <div class="text-2xl font-bold font-mono">$${spread.toFixed(2)}</div>
+                      <div class="text-xs text-secondary mt-xs">Price range across ${activePrices.length} companies</div>
                  </div>
              </div>
 
-             <!-- Analyst Prediction Box -->
-             <div class="p-md rounded flex gap-md items-start" 
-                  style="background: var(--bg-tertiary); border-left: 3px solid ${isPredictedUp ? 'var(--accent-error)' : 'var(--accent-success)'}">
-                  <div class="mt-xs text-2xl hidden-mobile">
-                     ${isPredictedUp ? '📈' : '📉'}
-                  </div>
-                  <div>
-                     <div class="font-bold mb-xs text-sm uppercase text-secondary">Analyst Prediction</div>
-                     <div class="text-base text-primary" style="line-height: 1.5;">
-                         The lowest vendor is expected to <strong class="${trendClass}">${isPredictedUp ? 'RISE' : 'FALL'}</strong> 
-                         based on ULSD signals${biasText}.
-                     </div>
-                  </div>
-             </div>
-
-             <!-- Visualization -->
              <div>
                 <div class="flex flex-between align-end mb-sm">
-                    <span class="text-xs font-bold uppercase text-secondary">Full Vendor Spread</span>
-                    <span class="text-xs text-secondary">${activePrices.length} companies</span>
+                    <span class="text-xs font-bold uppercase text-secondary">Price Landscape (Min to Max)</span>
                 </div>
                 <div class="market-spread-viz">
                    <div class="spread-track"></div>
                    ${vendorDots}
                    <div class="spread-labels">
-                      <span class="text-xs text-secondary">$${minPrice.toFixed(2)}</span>
-                      <span class="text-xs text-secondary" style="left: 50%; transform: translateX(-50%); position: absolute;">Avg: $${avgPrice.toFixed(2)}</span>
-                      <span class="text-xs text-secondary">$${maxPrice.toFixed(2)}</span>
+                      <span class="text-xs text-secondary font-mono">$${minPrice.toFixed(2)}</span>
+                      <span class="text-xs text-secondary font-mono" style="left: 50%; transform: translateX(-50%); position: absolute;">AVG: $${avgPrice.toFixed(2)}</span>
+                      <span class="text-xs text-secondary font-mono">$${maxPrice.toFixed(2)}</span>
                    </div>
                 </div>
              </div>
@@ -713,30 +689,39 @@ async function renderDashboard(container) {
     </div>
   `;
 
-  // Initialize charts
+  // Initialize charts (defensive rendering)
   if (priceTrends.labels?.length > 0) {
-    const priceCtx = document.getElementById('price-trend-chart');
-    storeChart('price-trend', createPriceTrendChart(priceCtx, priceTrends));
+    const priceCanvas = document.getElementById('price-trend-chart');
+    if (priceCanvas) {
+      const priceCtx = priceCanvas.getContext('2d');
+      storeChart('price-trend', createPriceTrendChart(priceCtx, priceTrends));
+    }
   }
 
   if (orderInsights && orderInsights.length > 0) {
-    const orderCtx = document.getElementById('order-chart');
-    storeChart('order-chart', createYearlyOrderInsightChart(orderCtx, orderInsights));
+    const orderCanvas = document.getElementById('order-chart');
+    if (orderCanvas) {
+      const orderCtx = orderCanvas.getContext('2d');
+      storeChart('order-chart', createYearlyOrderInsightChart(orderCtx, orderInsights));
+    }
   }
 
-  const tempCtx = document.getElementById('temp-chart');
-  if (tempCorrelation.temperatures?.labels?.length > 0) {
-    storeChart('temp-chart', createTemperatureChart(tempCtx, tempCorrelation));
-  } else {
-    tempCtx.parentElement.innerHTML = `
-      <div class="empty-state" style="padding: var(--space-xl) 0;">
-          <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--text-tertiary); margin-bottom: var(--space-md);">
-              <path d="M14 4v10.54a4 4 0 1 1-4 0V4a2 2 0 0 1 4 0Z"></path>
-          </svg>
-          <h3 class="empty-state-title">No Weather Data</h3>
-          <p class="empty-state-text">Configure a location to see temperature correlation.</p>
-      </div>
-    `;
+  const tempCanvas = document.getElementById('temp-chart');
+  if (tempCanvas) {
+    if (tempCorrelation.temperatures?.labels?.length > 0) {
+      const tempCtx = tempCanvas.getContext('2d');
+      storeChart('temp-chart', createTemperatureChart(tempCtx, tempCorrelation));
+    } else {
+      tempCanvas.parentElement.innerHTML = `
+        <div class="empty-state" style="padding: var(--space-xl) 0;">
+            <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--text-tertiary); margin-bottom: var(--space-md);">
+                <path d="M14 4v10.54a4 4 0 1 1-4 0V4a2 2 0 0 1 4 0Z"></path>
+            </svg>
+            <h3 class="empty-state-title">No Weather Correlation Data</h3>
+            <p class="empty-state-text">Populate location and order data to unlock heating demand insights.</p>
+        </div>
+      `;
+    }
   }
 }
 

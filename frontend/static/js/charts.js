@@ -27,18 +27,21 @@ const chartConfig = {
                 padding: 20,
                 usePointStyle: true,
                 pointStyle: 'circle',
+                color: '#a0a0a0'
             },
         },
         tooltip: {
-            backgroundColor: '#1f1f1f',
+            backgroundColor: 'rgba(20, 20, 22, 0.95)',
             titleColor: '#f5f5f5',
-            bodyColor: '#a0a0a0',
-            borderColor: '#2a2a2a',
+            bodyColor: '#a1a1aa',
+            borderColor: 'rgba(255, 255, 255, 0.1)',
             borderWidth: 1,
             padding: 12,
             cornerRadius: 8,
             displayColors: true,
             boxPadding: 6,
+            bodyFont: { family: "'Inter', sans-serif" },
+            titleFont: { family: "'Inter', sans-serif", weight: 'bold' }
         },
     },
 };
@@ -209,7 +212,7 @@ function createTemperatureChart(ctx, data) {
 
     // Calculate Heating Degree Days (HDD)
     // Base 65°F. HDD = max(0, 65 - avg_temp)
-    const hddData = temps.avg.map(t => Math.max(0, 65 - t));
+    const hddData = temps.avg.map(t => (t === null || t === undefined) ? null : Math.max(0, 65 - t));
 
     return new Chart(ctx, {
         type: 'line',
