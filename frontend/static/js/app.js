@@ -1405,8 +1405,8 @@ async function renderCompaniesPage(container) {
                         </div>
                     </td>
                     <td>
-                        <div class="sparkline-container">
-                            <canvas id="sparkline-${id}" width="120" height="30"></canvas>
+                        <div class="sparkline-container" style="overflow: visible;">
+                            <canvas id="sparkline-${id}" width="120" height="50"></canvas>
                         </div>
                         ${c.sparkline && c.sparkline.length > 0 ? (() => {
           const minPrice = Math.min(...c.sparkline.map(s => s.price));
@@ -1420,8 +1420,8 @@ async function renderCompaniesPage(container) {
                                 ${new Date(c.sparkline[c.sparkline.length - 1].date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
                             </div>
                             <div class="sparkline-extrema">
-                                <span class="extrema-label low" title="Low on ${formatDate(minDate)}">L: $${minPrice.toFixed(2)}</span>
-                                <span class="extrema-label high" title="High on ${formatDate(maxDate)}">H: $${maxPrice.toFixed(2)}</span>
+                                <span class="extrema-label low" title="Low on ${formatDate(minDate)}">L: $${minPrice.toFixed(3)}</span>
+                                <span class="extrema-label high" title="High on ${formatDate(maxDate)}">H: $${maxPrice.toFixed(3)}</span>
                             </div>
                         </div>
                         `;

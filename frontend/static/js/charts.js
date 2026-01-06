@@ -645,32 +645,48 @@ function createYoYComparisonChart(ctx, data, metricLabel) {
  * Create a mini sparkline chart for table rows
  */
 function createSparkline(ctx, data) {
+    const prices = data.map(d => d.price);
+    const minPrice = Math.min(...prices);
+    const maxPrice = Math.max(...prices);
+    const spread = maxPrice - minPrice;
+
+    // If the price change is very small (less than 10 cents), 
+    // force a minimum range so the line doesn't look like a dramatic trend.
+    const hasSmallSpread = spread < 0.1;
+    const yMin = hasSmallSpread ? minPrice - (0.1 - spread) / 2 : undefined;
+    const yMax = hasSmallSpread ? maxPrice + (0.1 - spread) / 2 : undefined;
+
     return new Chart(ctx, {
         type: 'line',
         data: {
             labels: data.map(d => d.date),
             datasets: [{
-                data: data.map(d => d.price),
+                data: prices,
                 borderColor: chartColors.primary,
                 borderWidth: 2,
                 pointRadius: 0,
                 fill: false,
-                tension: 0.4
+                tension: 0.1 // Straighter lines for sparklines
             }]
         },
         options: {
             maintainAspectRatio: false,
             responsive: true,
-            layout: { padding: 4 },
+            layout: { padding: { top: 5, bottom: 5 } },
             plugins: {
                 legend: { display: false },
                 tooltip: {
                     enabled: true,
-                    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                    mode: 'index',
+                    intersect: false,
+                    position: 'nearest',
+                    backgroundColor: 'rgba(0, 0, 0, 0.9)',
                     titleColor: '#fff',
                     bodyColor: '#fff',
                     padding: 4,
                     displayColors: false,
+                    titleFont: { size: 10 },
+                    bodyFont: { size: 10 },
                     callbacks: {
                         title: (items) => {
                             const d = new Date(items[0].label);
@@ -680,13 +696,14 @@ function createSparkline(ctx, data) {
                     }
                 }
             },
-            interaction: {
-                intersect: false,
-                mode: 'index',
-            },
             scales: {
                 x: { display: false },
-                y: { display: false }
+                y: {
+                    display: false,
+                    min: yMin,
+                    max: yMax,
+                    padding: 5
+                }
             }
         }
     });
