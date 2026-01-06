@@ -482,7 +482,7 @@ async function renderDashboard(container) {
     const cheapestVendor = activePrices.find(p => p.price_per_gallon === minPrice);
 
     snapshotHtml = `
-      <div class="card mb-lg animate-fade-in" style="border-left: 4px solid ${isPredictedUp ? 'var(--accent-error)' : 'var(--accent-success)'};">
+      <div class="card mb-lg animate-fade-in glass-effect" style="border-left: 4px solid ${isPredictedUp ? 'var(--accent-error)' : 'var(--accent-success)'};">
         <div class="card-header border-0 pb-0" style="border-bottom: none;">
              <div class="flex flex-between align-center w-full">
                 <h3 class="card-title">Market Snapshot & Vendor Spread</h3>
@@ -595,23 +595,25 @@ async function renderDashboard(container) {
     <div class="page-body">
       <!-- KPI Cards -->
       <div class="kpi-grid mb-lg">
-        <div class="kpi-card">
+        <div class="kpi-card glass-effect animate-fade-in" style="animation-delay: 0.1s">
           <div class="kpi-label">Current Low Price</div>
           <div class="kpi-value mono">${summary.latest_price ? `$${summary.latest_price.price.toFixed(3)}` : 'N/A'}</div>
-          <div class="kpi-meta">${summary.latest_price?.company || 'No data'}</div>
+          <div class="kpi-meta">
+            ${summary.latest_price?.company || 'No data'}
+          </div>
         </div>
-        <div class="kpi-card">
+        <div class="kpi-card glass-effect animate-fade-in" style="animation-delay: 0.2s">
           <div class="kpi-label">30-Day Average</div>
           <div class="kpi-value mono">${summary.avg_price_30d ? `$${summary.avg_price_30d.toFixed(3)}` : 'N/A'}</div>
-          <div class="kpi-meta">Per gallon</div>
+          <div class="kpi-meta text-secondary">Across local vendors</div>
         </div>
-        <div class="kpi-card">
+        <div class="kpi-card glass-effect animate-fade-in" style="animation-delay: 0.3s">
           <div class="kpi-label">Days Since Delivery</div>
           <div class="kpi-value mono ${summary.days_since_delivery > 60 ? 'negative' : ''}">${summary.days_since_delivery ?? 'N/A'}</div>
           <div class="kpi-meta">${summary.last_order ? `Last: ${formatDate(summary.last_order.date)}` : 'No orders'}</div>
         </div>
-        <div class="kpi-card">
-          <div class="kpi-label">Year to Date</div>
+        <div class="kpi-card glass-effect animate-fade-in" style="animation-delay: 0.4s">
+          <div class="kpi-label">Year to Date Spend</div>
           <div class="kpi-value mono">${formatCurrency(summary.year_to_date?.total_cost || 0)}</div>
           <div class="kpi-meta">${summary.year_to_date?.total_gallons?.toFixed(0) || 0} gallons</div>
         </div>
@@ -622,7 +624,7 @@ async function renderDashboard(container) {
 
       <!-- Charts -->
       <div class="chart-grid">
-        <div class="card">
+        <div class="card glass-effect">
           <div class="card-header">
             <h3 class="card-title">Price Trends (90 Days)</h3>
           </div>
@@ -632,7 +634,7 @@ async function renderDashboard(container) {
             </div>
           </div>
         </div>
-        <div class="card">
+        <div class="card glass-effect">
           <div class="card-header">
             <h3 class="card-title">Long-Term Order Analysis</h3>
           </div>
@@ -1374,8 +1376,26 @@ async function renderCompaniesPage(container) {
                     </td>
                     <td>
                         <div class="sparkline-container">
-                            <canvas id="sparkline-${id}" width="100" height="30"></canvas>
+                            <canvas id="sparkline-${id}" width="120" height="30"></canvas>
                         </div>
+                        ${c.sparkline && c.sparkline.length > 0 ? (() => {
+          const minPrice = Math.min(...c.sparkline.map(s => s.price));
+          const maxPrice = Math.max(...c.sparkline.map(s => s.price));
+          const minDate = c.sparkline.find(s => s.price === minPrice)?.date;
+          const maxDate = c.sparkline.find(s => s.price === maxPrice)?.date;
+          return `
+                        <div class="sparkline-meta">
+                            <div class="sparkline-period">
+                                ${new Date(c.sparkline[0].date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} – 
+                                ${new Date(c.sparkline[c.sparkline.length - 1].date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                            </div>
+                            <div class="sparkline-extrema">
+                                <span class="extrema-label low" title="Low on ${formatDate(minDate)}">L: $${minPrice.toFixed(2)}</span>
+                                <span class="extrema-label high" title="High on ${formatDate(maxDate)}">H: $${maxPrice.toFixed(2)}</span>
+                            </div>
+                        </div>
+                        `;
+        })() : ''}
                     </td>
                     <td class="mono">
                         <div>${formatDate(date)}</div>
@@ -4013,7 +4033,7 @@ async function renderAnalyticsPage(container) {
 
   // Custom inject for date inputs since they're not standard controls
   const customControlsHtml = `
-    <div class="page-header-unified">
+    <div class="page-header-unified glass-effect">
       <div class="page-header-main">
         <div class="header-title-zone">
           <h1 class="page-title">Analytics</h1>
@@ -4061,7 +4081,7 @@ async function renderAnalyticsPage(container) {
 
         
         <!-- Market Outlook Card - Fully Responsive -->
-        <div class="card mb-lg animate-fade-in" style="border-left: 4px solid var(--accent-primary);">
+        <div class="card mb-lg animate-fade-in glass-effect" style="border-left: 4px solid var(--accent-primary);">
             <div class="card-body">
                 <div class="market-outlook-container">
                     <!-- Top Row: Prediction + Commentary -->
@@ -4108,7 +4128,7 @@ async function renderAnalyticsPage(container) {
         <!-- Charts Grid - Responsive 2:1 layout -->
         <div class="analytics-charts-grid">
             <!-- Lead-Lag Analysis (Main Chart) -->
-            <div class="card">
+            <div class="card glass-effect">
                 <div class="card-header">
                     <div class="card-title flex items-center gap-sm flex-wrap">
                         <span>Future Price Predictor</span>
@@ -4128,7 +4148,7 @@ async function renderAnalyticsPage(container) {
             <!-- Side Column -->
             <div class="analytics-side-column">
                 <!-- Crack Spread -->
-                <div class="card">
+                <div class="card glass-effect">
                     <div class="card-header">
                         <div class="card-title flex items-center gap-sm flex-wrap">
                             <span>3:2:1 Crack Spread</span>
@@ -4146,7 +4166,7 @@ async function renderAnalyticsPage(container) {
                 </div>
 
                 <!-- Rankings with Latest Price -->
-                <div class="card rankings-card">
+                <div class="card rankings-card glass-effect">
                     <div class="card-header">
                         <div class="card-title">Cheapest Providers</div>
                     </div>
@@ -4174,7 +4194,7 @@ async function renderAnalyticsPage(container) {
         <!-- Additional Trend Charts -->
         <div class="analytics-charts-grid mt-lg">
             <!-- Market Index Trends -->
-            <div class="card">
+            <div class="card glass-effect">
                 <div class="card-header">
                     <div class="card-title flex items-center gap-sm">
                         <span>Market Index Trends</span>
@@ -4192,7 +4212,7 @@ async function renderAnalyticsPage(container) {
             </div>
 
             <!-- EIA Index Trends -->
-            <div class="card">
+            <div class="card glass-effect">
                 <div class="card-header">
                     <div class="card-title flex items-center gap-sm">
                         <span>EIA Spot Price Trends</span>

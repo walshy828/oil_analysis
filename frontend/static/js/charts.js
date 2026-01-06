@@ -661,16 +661,33 @@ function createSparkline(ctx, data) {
         options: {
             maintainAspectRatio: false,
             responsive: true,
-            layout: { padding: 2 },
+            layout: { padding: 4 },
             plugins: {
                 legend: { display: false },
-                tooltip: { enabled: false }
+                tooltip: {
+                    enabled: true,
+                    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                    titleColor: '#fff',
+                    bodyColor: '#fff',
+                    padding: 4,
+                    displayColors: false,
+                    callbacks: {
+                        title: (items) => {
+                            const d = new Date(items[0].label);
+                            return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+                        },
+                        label: (item) => `$${item.parsed.y.toFixed(3)}`
+                    }
+                }
+            },
+            interaction: {
+                intersect: false,
+                mode: 'index',
             },
             scales: {
                 x: { display: false },
                 y: { display: false }
-            },
-            events: []
+            }
         }
     });
 }
