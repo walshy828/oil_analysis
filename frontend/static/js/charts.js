@@ -221,7 +221,7 @@ function createTemperatureChart(ctx, data) {
             datasets: [
                 {
                     label: 'Heating Demand (HDD)',
-                    data: hddData,
+                    data: hddData.map((val, i) => ({ x: temps.labels[i], y: val })),
                     borderColor: '#f59e0b', // Amber color for Heat Demand
                     backgroundColor: 'rgba(245, 158, 11, 0.2)',
                     fill: true,
@@ -229,7 +229,8 @@ function createTemperatureChart(ctx, data) {
                     pointRadius: 0,
                     pointHoverRadius: 4,
                     yAxisID: 'y',
-                    order: 2
+                    order: 2,
+                    spanGaps: false
                 },
                 {
                     label: 'Oil Usage (Gal)',
@@ -490,7 +491,7 @@ function createYearlyOrderInsightChart(ctx, data) {
     return new Chart(ctx, {
         type: 'bar',
         data: {
-            labels: data.map(d => d.year),
+            labels: data.map(d => d.year.toString()),
             datasets: [
                 {
                     label: 'Total Cost ($)',
@@ -507,7 +508,7 @@ function createYearlyOrderInsightChart(ctx, data) {
                     backgroundColor: chartColors.success + '40',
                     borderColor: chartColors.success,
                     borderWidth: 1,
-                    yAxisID: 'y1',
+                    yAxisID: 'y', // Share the primary Y axis for volume/cost context
                     order: 3
                 },
                 {
@@ -547,7 +548,10 @@ function createYearlyOrderInsightChart(ctx, data) {
                     title: { display: true, text: 'Avg Price ($/gal)' },
                     grid: { drawOnChartArea: false },
                     ticks: {
-                        callback: (val) => `$${val.toFixed(2)}`
+                        callback: (val) => {
+                            if (val === null || val === undefined) return '';
+                            return `$${Number(val).toFixed(2)}`;
+                        }
                     }
                 }
             },

@@ -108,26 +108,31 @@ async def get_price_trends(
     company_id: Optional[int] = None,
     db: Session = Depends(get_db)
 ):
-    """Get price trends for charting."""
+    """Get price trends for charting based on snapshot (observation) date."""
     start_date = date.today() - timedelta(days=days)
     
+    # Use func.date(scraped_at) to group by the day we observed the price
+    # This ensures that even if a vendor hasn't updated their 'reported date',
+    # their current price contributes to the market snapshot for the day we scraped it.
+    obs_date = func.date(OilPrice.scraped_at).label('obs_date')
+    
     query = db.query(
-        OilPrice.date_reported,
+        obs_date,
         func.min(OilPrice.price_per_gallon).label('min_price'),
         func.max(OilPrice.price_per_gallon).label('max_price'),
         func.avg(OilPrice.price_per_gallon).label('avg_price')
-    ).join(Company).filter(OilPrice.date_reported >= start_date)
+    ).join(Company).filter(obs_date >= start_date)
     
     if company_id:
         query = query.filter(OilPrice.company_id == company_id)
     else:
-        # If no company specified, default to local deliveries only
+        # Default to local deliveries only
         query = query.filter(Company.is_market_index == False)
     
-    results = query.group_by(OilPrice.date_reported).order_by(OilPrice.date_reported).all()
+    results = query.group_by('obs_date').order_by('obs_date').all()
     
     return {
-        "labels": [r.date_reported.isoformat() for r in results],
+        "labels": [r.obs_date.isoformat() if hasattr(r.obs_date, 'isoformat') else str(r.obs_date) for r in results],
         "datasets": {
             "min": [float(r.min_price) for r in results],
             "max": [float(r.max_price) for r in results],

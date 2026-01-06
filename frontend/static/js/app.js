@@ -689,40 +689,42 @@ async function renderDashboard(container) {
     </div>
   `;
 
-  // Initialize charts (defensive rendering)
-  if (priceTrends.labels?.length > 0) {
-    const priceCanvas = document.getElementById('price-trend-chart');
-    if (priceCanvas) {
-      const priceCtx = priceCanvas.getContext('2d');
-      storeChart('price-trend', createPriceTrendChart(priceCtx, priceTrends));
+  // Initialize charts with a micro-delay to ensure DOM layout is computed
+  setTimeout(() => {
+    if (priceTrends.labels?.length > 0) {
+      const priceCanvas = document.getElementById('price-trend-chart');
+      if (priceCanvas) {
+        storeChart('price-trend', createPriceTrendChart(priceCanvas, priceTrends));
+      }
     }
-  }
 
-  if (orderInsights && orderInsights.length > 0) {
-    const orderCanvas = document.getElementById('order-chart');
-    if (orderCanvas) {
-      const orderCtx = orderCanvas.getContext('2d');
-      storeChart('order-chart', createYearlyOrderInsightChart(orderCtx, orderInsights));
+    if (orderInsights && orderInsights.length > 0) {
+      const orderCanvas = document.getElementById('order-chart');
+      if (orderCanvas) {
+        storeChart('order-chart', createYearlyOrderInsightChart(orderCanvas, orderInsights));
+      }
     }
-  }
 
-  const tempCanvas = document.getElementById('temp-chart');
-  if (tempCanvas) {
-    if (tempCorrelation.temperatures?.labels?.length > 0) {
-      const tempCtx = tempCanvas.getContext('2d');
-      storeChart('temp-chart', createTemperatureChart(tempCtx, tempCorrelation));
-    } else {
-      tempCanvas.parentElement.innerHTML = `
-        <div class="empty-state" style="padding: var(--space-xl) 0;">
-            <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--text-tertiary); margin-bottom: var(--space-md);">
-                <path d="M14 4v10.54a4 4 0 1 1-4 0V4a2 2 0 0 1 4 0Z"></path>
-            </svg>
-            <h3 class="empty-state-title">No Weather Correlation Data</h3>
-            <p class="empty-state-text">Populate location and order data to unlock heating demand insights.</p>
-        </div>
-      `;
+    const tempCanvas = document.getElementById('temp-chart');
+    if (tempCanvas) {
+      if (tempCorrelation.temperatures?.labels?.length > 0) {
+        storeChart('temp-chart', createTemperatureChart(tempCanvas, tempCorrelation));
+      } else {
+        tempCanvas.parentElement.innerHTML = `
+          <div class="empty-state" style="padding: var(--space-xl) 0;">
+              <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--text-tertiary); margin-bottom: var(--space-md);">
+                  <path d="M14 4v10.54a4 4 0 1 1-4 0V4a2 2 0 0 1 4 0Z"></path>
+              </svg>
+              <h3 class="empty-state-title">No Weather Correlation Data</h3>
+              <p class="empty-state-text">Populate location and order data to unlock heating demand insights.</p>
+          </div>
+        `;
+      }
     }
-  }
+
+    // Final resize trigger to be safe
+    resizeAllCharts();
+  }, 0);
 }
 
 async function runQuickScrape() {
