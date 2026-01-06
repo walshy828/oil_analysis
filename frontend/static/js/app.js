@@ -472,6 +472,35 @@ async function renderDashboard(container) {
     const isPredictedUp = predictedDir === 'UP';
     const spreadTrend = crackSpread.analysis?.trend_direction || 'neutral';
 
+    // Best Action Insight
+    let insightBanner = '';
+    const isPriceLow = minPrice <= (summary.avg_price_30d * 0.98); // 2% below 30d avg
+    const needsOil = summary.days_since_delivery > 60;
+
+    if (isPriceLow && !isPredictedUp) {
+      insightBanner = `
+        <div class="alert animate-fade-in" style="background: rgba(74, 222, 128, 0.1); border: 1px solid var(--accent-success); color: var(--accent-success); margin-bottom: var(--space-lg); display: flex; align-items: center; gap: var(--space-md);">
+          <div style="font-size: 1.5rem;">✨</div>
+          <div>
+            <div class="font-bold">Excellent Buying Opportunity</div>
+            <div class="text-sm">Prices are at a 30-day low and trending ${predictedDir.toLowerCase()}. Consider ordering now.</div>
+          </div>
+          <button class="btn btn-sm btn-success ml-auto" onclick="showAddOrderModal()">Add Order</button>
+        </div>
+      `;
+    } else if (isStale) {
+      insightBanner = `
+        <div class="alert animate-fade-in" style="background: rgba(251, 191, 36, 0.1); border: 1px solid var(--accent-warning); color: var(--accent-warning); margin-bottom: var(--space-lg); display: flex; align-items: center; gap: var(--space-md);">
+          <div style="font-size: 1.5rem;">⚠️</div>
+          <div>
+            <div class="font-bold">Data is Stale</div>
+            <div class="text-sm">Market data hasn't been updated in over 24 hours. Refresh for the latest prices.</div>
+          </div>
+          <button class="btn btn-sm btn-warning ml-auto" onclick="runQuickScrape()">Refresh Now</button>
+        </div>
+      `;
+    }
+
     let biasText = '';
     if (spreadTrend === 'widening') biasText = ' and widening refinery margins';
     if (spreadTrend === 'narrowing') biasText = ' despite narrowing refinery margins';
@@ -593,6 +622,7 @@ async function renderDashboard(container) {
     ${headerHtml}
 
     <div class="page-body">
+      ${insightBanner}
       <!-- KPI Cards -->
       <div class="kpi-grid mb-lg">
         <div class="kpi-card glass-effect animate-fade-in" style="animation-delay: 0.1s">
@@ -2366,22 +2396,20 @@ async function renderUsagePage(container) {
       
       <!-- Stats Row -->
       <div class="usage-stats-row mb-lg">
-        <div class="usage-stat-card" id="tank-level-card">
-          <div class="usage-stat-icon" style="background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);">
-            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M12 2v6l3-3M12 22v-6l-3 3"></path>
-              <circle cx="12" cy="12" r="10"></circle>
-            </svg>
+        <div class="usage-stat-card glass-effect" id="tank-level-card" style="padding: 0; overflow: hidden; display: flex; flex-direction: column;">
+          <div class="tank-visual-container">
+            <div class="tank-gauge-outer">
+              <div class="tank-gauge-fill" id="tank-gauge-fill-animated"></div>
+              <div class="tank-gauge-value" id="tank-gauge-value-text">--</div>
+            </div>
           </div>
-          <div class="usage-stat-content">
+          <div class="p-md">
             <div class="usage-stat-label">Current Level</div>
-            <div class="usage-stat-value" id="tank-level-value">--</div>
             <div class="usage-stat-sub" id="tank-level-sub">Loading...</div>
           </div>
-          <div class="usage-stat-bar" id="tank-level-bar"></div>
         </div>
         
-        <div class="usage-stat-card" id="usage-summary-card">
+        <div class="usage-stat-card glass-effect" id="usage-summary-card">
           <div class="usage-stat-icon" style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);">
             <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
@@ -2394,7 +2422,7 @@ async function renderUsagePage(container) {
           </div>
         </div>
         
-        <div class="usage-stat-card" id="cost-estimate-card">
+        <div class="usage-stat-card glass-effect" id="cost-estimate-card">
           <div class="usage-stat-icon" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%);">
             <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <line x1="12" y1="1" x2="12" y2="23"></line>
@@ -2408,7 +2436,7 @@ async function renderUsagePage(container) {
           </div>
         </div>
         
-        <div class="usage-stat-card usage-upload-card">
+        <div class="usage-stat-card glass-effect usage-upload-card">
           <div class="usage-stat-icon" style="background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);">
             <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
@@ -2656,22 +2684,21 @@ async function loadUsageData() {
     ]);
 
     // Tank Level Card
-    const levelValue = document.getElementById('tank-level-value');
     const levelSub = document.getElementById('tank-level-sub');
-    const levelBar = document.getElementById('tank-level-bar');
+    const gaugeFill = document.getElementById('tank-gauge-fill-animated');
+    const gaugeText = document.getElementById('tank-gauge-value-text');
 
     if (currentLevel.current_gallons !== null) {
       const percent = currentLevel.percent_full;
       const color = percent > 30 ? '#10b981' : percent > 15 ? '#f59e0b' : '#ef4444';
 
-      levelValue.textContent = `${currentLevel.current_gallons} gal`;
-      levelValue.style.color = color;
-      levelSub.textContent = `${percent}% of ${currentLevel.tank_capacity} gal capacity`;
-      levelBar.style.setProperty('--bar-width', `${percent}% `);
-      levelBar.style.setProperty('--bar-color', color);
+      if (gaugeFill) gaugeFill.style.height = `${percent}%`;
+      if (gaugeFill) gaugeFill.style.background = `linear-gradient(to top, ${color}, ${color}dd)`;
+      if (gaugeText) gaugeText.textContent = `${percent}%`;
+
+      levelSub.textContent = `${currentLevel.current_gallons} gal of ${currentLevel.tank_capacity} gal capacity`;
     } else {
-      levelValue.textContent = 'No data';
-      levelValue.style.color = 'var(--text-secondary)';
+      if (gaugeText) gaugeText.textContent = '--';
       levelSub.textContent = 'Upload CSV to get started';
     }
 
