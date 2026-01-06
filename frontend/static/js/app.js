@@ -397,6 +397,7 @@ async function renderDashboard(container) {
 
   // --- Market Snapshot Logic ---
   let snapshotHtml = '';
+  let insightBanner = '';
   if (latestPrices && latestPrices.length > 0) {
     // Use all latest prices as requested (no filtering by freshness)
     const activePrices = latestPrices;
@@ -473,7 +474,6 @@ async function renderDashboard(container) {
     const spreadTrend = crackSpread.analysis?.trend_direction || 'neutral';
 
     // Best Action Insight
-    let insightBanner = '';
     const isPriceLow = minPrice <= (summary.avg_price_30d * 0.98); // 2% below 30d avg
     const needsOil = summary.days_since_delivery > 60;
 
