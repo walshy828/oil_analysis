@@ -150,6 +150,22 @@ async def get_latest_prices(
             CompanyAlias.company_id == row.company_id
         ).all()
         
+        # Get previous price for trend
+        prev_price_row = db.query(OilPrice.price_per_gallon).filter(
+            OilPrice.company_id == row.company_id,
+            OilPrice.scraped_at < row.scraped_at
+        ).order_by(desc(OilPrice.scraped_at)).first()
+        
+        prev_price = float(prev_price_row[0]) if prev_price_row else None
+        
+        # Get last 10 prices for sparkline
+        history_rows = db.query(OilPrice.price_per_gallon, OilPrice.date_reported).filter(
+            OilPrice.company_id == row.company_id
+        ).order_by(desc(OilPrice.date_reported)).limit(10).all()
+        
+        # Reverse to get chronological order for sparkline
+        sparkline_data = [{"price": float(h[0]), "date": h[1].isoformat()} for h in reversed(history_rows)]
+        
         response.append({
             "id": row.id,
             "company_id": row.company_id,
@@ -157,6 +173,9 @@ async def get_latest_prices(
             "company_website": row.company_website,
             "company_phone": row.company_phone,
             "price_per_gallon": float(row.price_per_gallon),
+            "previous_price": prev_price,
+            "price_change": (float(row.price_per_gallon) - prev_price) if prev_price else 0,
+            "sparkline": sparkline_data,
             "town": row.town,
             "date_reported": row.date_reported.isoformat() if row.date_reported else None,
             "scraped_at": (row.scraped_at.isoformat() + "Z") if row.scraped_at else None,

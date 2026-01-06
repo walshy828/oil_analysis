@@ -101,6 +101,26 @@ body {
   min-height: 100vh;
 }
 
+/* ==================== Custom Scrollbar ==================== */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-primary);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--bg-hover);
+  border-radius: var(--radius-full);
+  border: 2px solid var(--bg-primary);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--border-primary);
+}
+
 a {
   color: var(--accent-primary);
   text-decoration: none;
@@ -109,6 +129,61 @@ a {
 
 a:hover {
   color: var(--accent-primary-hover);
+}
+
+/* ==================== Animations & Loaders ==================== */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.4s ease-out forwards;
+}
+
+@keyframes pulse {
+  0% {
+    opacity: 0.6;
+  }
+
+  50% {
+    opacity: 0.3;
+  }
+
+  100% {
+    opacity: 0.6;
+  }
+}
+
+.skeleton {
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-sm);
+  animation: pulse 1.5s infinite ease-in-out;
+}
+
+.skeleton-text {
+  height: 1rem;
+  width: 100%;
+  margin-bottom: var(--space-xs);
+}
+
+.skeleton-title {
+  height: 1.5rem;
+  width: 60%;
+  margin-bottom: var(--space-sm);
+}
+
+.skeleton-card {
+  height: 200px;
+  width: 100%;
+  border-radius: var(--radius-lg);
 }
 
 /* ==================== Typography ==================== */
@@ -787,6 +862,64 @@ h4 {
 .data-table .mono {
   font-family: var(--font-mono);
   font-size: var(--text-xs);
+}
+
+/* ==================== Trend & Sparkline Styles ==================== */
+.trend-indicator {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  font-size: var(--text-xs);
+  font-weight: 500;
+}
+
+.trend-up {
+  color: var(--accent-error);
+}
+
+.trend-down {
+  color: var(--accent-success);
+}
+
+.trend-neutral {
+  color: var(--text-tertiary);
+}
+
+.price-change-tag {
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.price-change-up {
+  background: rgba(239, 68, 68, 0.1);
+  color: var(--accent-error);
+}
+
+.price-change-down {
+  background: rgba(74, 222, 128, 0.1);
+  color: var(--accent-success);
+}
+
+.sparkline-container {
+  width: 100px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+}
+
+/* ==================== Glassmorphism Enhancements ==================== */
+.glass-effect {
+  background: rgba(17, 17, 17, 0.7) !important;
+  backdrop-filter: blur(12px) saturate(180%);
+  -webkit-backdrop-filter: blur(12px) saturate(180%);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+}
+
+.sidebar.glass-effect {
+  background: rgba(10, 10, 10, 0.8) !important;
+  border-right: 1px solid rgba(255, 255, 255, 0.08) !important;
 }
 
 /* ==================== Forms ==================== */

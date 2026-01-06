@@ -1298,7 +1298,8 @@ async function renderCompaniesPage(container) {
                   <th class="sortable" onclick="handleSort('companies-table', 1, 'text')">Company Name</th>
                   ${showMergedCompanies ? '<th>Merged Into</th>' : `
                   <th class="sortable" onclick="handleSort('companies-table', 2, 'number')">Latest Price</th>
-                  <th class="sortable" onclick="handleSort('companies-table', 3, 'date')">Last Updated</th>
+                  <th>Trend</th>
+                  <th class="sortable" onclick="handleSort('companies-table', 4, 'date')">Last Updated</th>
                   `}
                   <th>Actions</th>
                 </tr>
@@ -1361,7 +1362,21 @@ async function renderCompaniesPage(container) {
                         ` : ''}
                     </td>
                     ${showMergedCompanies ? `<td><span class="badge badge-warning">Merged</span></td>` : `
-                    <td class="mono">${priceDisplay}</td>
+                    <td class="mono">
+                        <div class="flex flex-col">
+                            ${priceDisplay}
+                            ${c.price_change !== 0 ? `
+                                <div class="price-change-tag ${c.price_change > 0 ? 'price-change-up' : 'price-change-down'}" style="margin-top: 4px; width: fit-content;">
+                                    ${c.price_change > 0 ? '↑' : '↓'} ${formatCurrency(Math.abs(c.price_change))}
+                                </div>
+                            ` : ''}
+                        </div>
+                    </td>
+                    <td>
+                        <div class="sparkline-container">
+                            <canvas id="sparkline-${id}" width="100" height="30"></canvas>
+                        </div>
+                    </td>
                     <td class="mono">
                         <div>${formatDate(date)}</div>
                         ${c.scraped_at ? `<div style="font-size: 0.7em; color: var(--text-secondary);" title="Snapshot time">Snap: ${formatDateTime(c.scraped_at)}</div>` : ''}
@@ -1369,7 +1384,7 @@ async function renderCompaniesPage(container) {
                     `}
                     <td>
                         <div class="flex gap-sm">
-                            <button class="btn btn-ghost btn-sm" onclick="viewCompanyPrices('${name}')" title="View History">
+                            <button class="btn btn-ghost btn-sm" onclick="showCompanyDetailModal(${id}, '${name.replace(/'/g, "\\'")}')" title="View Full History">
                                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
                             </button>
                             ${showMergedCompanies ? '' : `
@@ -1388,6 +1403,17 @@ async function renderCompaniesPage(container) {
       </div>
     </div>
   `;
+
+  // Render sparklines after the table is in the DOM
+  if (!showMergedCompanies) {
+    companiesData.forEach(c => {
+      const id = c.id || c.company_id;
+      const canvas = document.getElementById(`sparkline-${id}`);
+      if (canvas && c.sparkline && c.sparkline.length > 1) {
+        createSparkline(canvas, c.sparkline);
+      }
+    });
+  }
 }
 
 async function changeSnapshotFilter(value) {
@@ -1485,6 +1511,104 @@ async function viewCompanyPrices(companyName) {
     document.getElementById('toggle-history').checked = true;
     applyPriceFilters();
   }, 100);
+}
+
+async function showCompanyDetailModal(companyId, companyName) {
+  document.getElementById('modal-title').textContent = companyName;
+  document.getElementById('modal-body').innerHTML = `
+    <div class="p-md">
+      <div id="company-detail-stats" class="grid grid-2 gap-md mb-lg">
+        <div class="p-sm rounded bg-secondary">
+          <div class="text-xs text-secondary uppercase mb-xs">Latest Price</div>
+          <div id="detail-latest-price" class="text-xl font-bold font-mono">Loading...</div>
+        </div>
+        <div class="p-sm rounded bg-secondary">
+          <div class="text-xs text-secondary uppercase mb-xs">30d Change</div>
+          <div id="detail-30d-change" class="text-xl font-bold font-mono">--</div>
+        </div>
+      </div>
+      <div class="chart-container" style="height: 300px;">
+        <canvas id="company-history-chart"></canvas>
+      </div>
+      <div class="mt-lg">
+        <button class="btn btn-outline btn-sm w-full" onclick="viewCompanyPrices('${companyName.replace(/'/g, "\\'")}'); closeModal();">
+          View All Raw Price Records
+        </button>
+      </div>
+    </div>
+  `;
+
+  // Clear footer for this view
+  document.getElementById('modal-footer').style.display = 'none';
+
+  openModal();
+
+  // Fetch history
+  try {
+    const history = await api.getCompanyPriceHistory(companyId, 365);
+    if (!history || history.length === 0) {
+      document.getElementById('company-history-chart').parentElement.innerHTML = '<p class="text-center p-xl text-secondary">No history available.</p>';
+      return;
+    }
+
+    const latest = history[history.length - 1];
+    document.getElementById('detail-latest-price').textContent = formatCurrency(latest.price);
+
+    // Calculate 30d change
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    const startPriceObj = history.find(h => new Date(h.date) >= thirtyDaysAgo);
+    if (startPriceObj) {
+      const diff = latest.price - startPriceObj.price;
+      const colorClass = diff > 0 ? 'text-error' : diff < 0 ? 'text-success' : '';
+      const sign = diff > 0 ? '+' : '';
+      document.getElementById('detail-30d-change').textContent = `${sign}${formatCurrency(diff)}`;
+      document.getElementById('detail-30d-change').className = `text-xl font-bold font-mono ${colorClass}`;
+    }
+
+    const ctx = document.getElementById('company-history-chart').getContext('2d');
+    new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: history.map(h => h.date),
+        datasets: [{
+          label: 'Price per Gallon',
+          data: history.map(h => h.price),
+          borderColor: '#5e6ad2',
+          backgroundColor: 'rgba(94, 106, 210, 0.1)',
+          fill: true,
+          tension: 0.4,
+          pointRadius: 2,
+          pointHoverRadius: 6
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: (ctx) => `$${ctx.parsed.y.toFixed(3)}`
+            }
+          }
+        },
+        scales: {
+          x: {
+            type: 'time',
+            time: { unit: 'month' },
+            grid: { display: false }
+          },
+          y: {
+            ticks: { callback: (val) => `$${val.toFixed(2)}` }
+          }
+        }
+      }
+    });
+
+  } catch (err) {
+    showToast("Failed to load history: " + err.message, "error");
+  }
 }
 
 // ==================== Orders Page ====================
@@ -3460,6 +3584,7 @@ async function deleteScrapeConfig(configId) {
 
 function openModal() {
   document.getElementById('modal-overlay').classList.add('active');
+  document.getElementById('modal-footer').style.display = 'flex';
 }
 
 function closeModal() {
@@ -4849,7 +4974,7 @@ function generateUnifiedHeader(config) {
   `;
 
   return `
-    <div class="page-header-unified">
+    <div class="page-header-unified glass-effect">
       <div class="page-header-main">
         <div class="header-title-zone">
           <h1 class="page-title">${title}</h1>

@@ -641,6 +641,40 @@ function createYoYComparisonChart(ctx, data, metricLabel) {
     });
 }
 
+/**
+ * Create a mini sparkline chart for table rows
+ */
+function createSparkline(ctx, data) {
+    return new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: data.map(d => d.date),
+            datasets: [{
+                data: data.map(d => d.price),
+                borderColor: chartColors.primary,
+                borderWidth: 2,
+                pointRadius: 0,
+                fill: false,
+                tension: 0.4
+            }]
+        },
+        options: {
+            maintainAspectRatio: false,
+            responsive: true,
+            layout: { padding: 2 },
+            plugins: {
+                legend: { display: false },
+                tooltip: { enabled: false }
+            },
+            scales: {
+                x: { display: false },
+                y: { display: false }
+            },
+            events: []
+        }
+    });
+}
+
 // Store chart instances for cleanup
 const chartInstances = {};
 
