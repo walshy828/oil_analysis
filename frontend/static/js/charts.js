@@ -935,19 +935,30 @@ function createSparkline(ctx, data) {
 const chartInstances = {};
 
 function destroyChart(id) {
-    // Phase 1: Explicit Tracking (Preferred)
+    // Stage 1: Explicit Tracking Cleanup
     if (chartInstances[id]) {
-        chartInstances[id].destroy();
+        try {
+            // Only destroy if the instance is still valid
+            if (typeof chartInstances[id].destroy === 'function') {
+                chartInstances[id].destroy();
+            }
+        } catch (e) {
+            console.warn(`Error destroying tracked chart "${id}":`, e);
+        }
         delete chartInstances[id];
     }
 
-    // Phase 2: Canvas Detection (Nuclear Safety)
-    // If 'id' corresponds to a canvas ID, manually check Chart.js registry
+    // Stage 2: DOM-based Search & Destroy (Nuclear Safety)
+    // Sometimes charts are created without being stored in chartInstances
     const canvas = document.getElementById(id);
     if (canvas) {
         const existing = Chart.getChart(canvas);
         if (existing) {
-            existing.destroy();
+            try {
+                existing.destroy();
+            } catch (e) {
+                console.warn(`Error destroying DOM-found chart on "#${id}":`, e);
+            }
         }
     }
 }
@@ -958,9 +969,19 @@ function storeChart(id, chart) {
 }
 
 function resizeAllCharts() {
-    Object.values(chartInstances).forEach(chart => {
+    Object.keys(chartInstances).forEach(id => {
+        const chart = chartInstances[id];
+        // Critical UX Bugfix: Ensure canvas is still in DOM before resizing.
+        // Failing to check this causes the "ownerDocument of null" error when 
+        // chartjs tries to measure a detached element during/after page transitions.
         if (chart && typeof chart.resize === 'function') {
-            chart.resize();
+            try {
+                if (chart.canvas && document.body.contains(chart.canvas)) {
+                    chart.resize();
+                }
+            } catch (e) {
+                console.warn(`Suppressed resize error for chart "${id}":`, e);
+            }
         }
     });
 }
