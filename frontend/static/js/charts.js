@@ -254,13 +254,8 @@ function createTemperatureChart(ctx, data) {
             },
             scales: {
                 x: {
-                    type: 'category', // Simplified from 'time' to ensure bar alignment with labels
-                    grid: {
-                        display: false,
-                    },
-                    ticks: {
-                        color: '#a0a0a0'
-                    }
+                    grid: { display: false },
+                    ticks: { color: '#a0a0a0' }
                 },
                 y: {
                     type: 'linear',
@@ -491,32 +486,26 @@ function createYearlyOrderInsightChart(ctx, data) {
             datasets: [
                 {
                     label: 'Total Cost ($)',
-                    data: data.map(d => d.total_cost),
-                    backgroundColor: 'rgba(94, 106, 210, 0.8)', // Primary color
-                    borderColor: '#5e6ad2',
-                    borderWidth: 1,
+                    data: (data || []).map(d => d.total_cost),
+                    backgroundColor: 'rgba(94, 106, 210, 0.8)',
                     yAxisID: 'y',
                     order: 2
                 },
                 {
                     label: 'Gallons',
-                    data: data.map(d => d.total_gallons),
-                    backgroundColor: 'rgba(16, 185, 129, 0.4)', // Success color
-                    borderColor: '#10b981',
-                    borderWidth: 1,
-                    yAxisID: 'y', // Share primary axis
+                    data: (data || []).map(d => d.total_gallons),
+                    backgroundColor: 'rgba(16, 185, 129, 0.4)',
+                    yAxisID: 'y',
                     order: 3
                 },
                 {
                     label: 'Avg Price ($/gal)',
-                    data: data.map(d => d.avg_price_per_gallon),
+                    data: (data || []).map(d => d.avg_price_per_gallon),
                     type: 'line',
-                    borderColor: chartColors.warning,
-                    backgroundColor: 'transparent',
+                    borderColor: '#f59e0b',
                     borderWidth: 3,
-                    pointRadius: 4,
-                    tension: 0.2,
-                    yAxisID: 'y1', // Use secondary axis (was y2)
+                    tension: 0.3,
+                    yAxisID: 'y1',
                     order: 1
                 }
             ]
