@@ -208,7 +208,12 @@ function createTemperatureChart(ctx, data) {
     }
 
     const temps = data.temperatures || { labels: [], avg: [] };
-    const orders = data.orders || [];
+    const orders = data.orders || data.usage || [];
+
+    console.log('Rendering Temp Chart:', { temps: temps.labels.length, orders: orders.length });
+
+    // Safety: Ensure we have explicit height
+    if (ctx.canvas) ctx.canvas.style.height = '300px';
 
     // Calculate Heating Degree Days (HDD)
     // Base 65°F. HDD = max(0, 65 - avg_temp)
@@ -479,23 +484,27 @@ function createOrderVolumeInsightChart(ctx, orders) {
 function createYearlyOrderInsightChart(ctx, data) {
     const existing = Chart.getChart(ctx);
     if (existing) existing.destroy();
+
+    console.log('Rendering Order Chart:', { records: data ? data.length : 0 });
+    // Safety: Ensure we have explicit height
+    if (ctx.canvas) ctx.canvas.style.height = '300px';
+
     return new Chart(ctx, {
         type: 'bar',
         data: {
-            labels: data.map(d => d.year.toString()),
+            labels: (data || []).map(d => d.year.toString()),
             datasets: [
                 {
                     label: 'Total Cost ($)',
                     data: (data || []).map(d => d.total_cost),
                     backgroundColor: 'rgba(94, 106, 210, 0.8)',
-                    yAxisID: 'y',
                     order: 2
                 },
                 {
                     label: 'Gallons',
                     data: (data || []).map(d => d.total_gallons),
                     backgroundColor: 'rgba(16, 185, 129, 0.4)',
-                    yAxisID: 'y',
+                    yAxisID: 'y1', // Move gallons to secondary axis
                     order: 3
                 },
                 {
@@ -514,25 +523,20 @@ function createYearlyOrderInsightChart(ctx, data) {
             ...chartConfig,
             scales: {
                 x: {
-                    grid: { display: false }
+                    grid: { display: false },
+                    ticks: { color: '#a0a0a0' }
                 },
                 y: {
                     type: 'linear',
                     position: 'left',
-                    title: { display: true, text: 'Cost & Gallons' },
+                    title: { display: true, text: 'Total Cost ($)' },
                     grid: { color: 'rgba(255,255,255,0.05)' }
                 },
                 y1: {
                     type: 'linear',
                     position: 'right',
-                    title: { display: true, text: 'Avg Price ($/gal)' },
-                    grid: { drawOnChartArea: false },
-                    ticks: {
-                        callback: (val) => {
-                            if (val === null || val === undefined) return '';
-                            return `$${Number(val).toFixed(2)}`;
-                        }
-                    }
+                    title: { display: true, text: 'Gallons & Price' },
+                    grid: { drawOnChartArea: false }
                 }
             },
             plugins: {

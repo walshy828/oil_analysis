@@ -736,10 +736,7 @@ async function renderDashboard(container) {
     } catch (e) {
       console.error('Failed to render Temperature Correlation chart:', e);
     }
-
-    // Final resize trigger to ensure layout is tight
-    resizeAllCharts();
-  }, 50); // Increased delay slightly to 50ms for better layout stabilization
+  }, 500); // 500ms delay to allow CSS grid/flex animations to settle before measuring canvas
 }
 
 async function runQuickScrape() {
