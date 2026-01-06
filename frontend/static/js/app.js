@@ -1288,7 +1288,14 @@ async function renderCompaniesPage(container) {
   const headerHtml = generateUnifiedHeader({
     title: 'Companies',
     subtitle: `${companiesData.length} companies found`,
-    primaryActions: [],
+    primaryActions: [
+      {
+        label: 'Add Company',
+        icon: headerIcons.add,
+        onclick: 'showAddCompanyModal()',
+        class: 'btn-primary'
+      }
+    ],
     secondaryActions: [
       {
         label: 'Compare Selected',
@@ -1548,6 +1555,71 @@ function toggleCompanySelection(companyId, companyName) {
       ? `Selected: ${selectedCompanies[0].name}. Select more to compare or one more to merge.`
       : 'Select companies to compare or merge duplicates';
   }
+}
+
+// === Add Company Modal ===
+async function showAddCompanyModal(returnToOrderFlow = false) {
+  document.getElementById('modal-title').textContent = 'Add Company';
+  document.getElementById('modal-body').innerHTML = `
+    <form id="add-company-form">
+      <div class="form-group">
+        <label class="form-label">Company Name *</label>
+        <input type="text" class="form-input" id="new-company-name" required placeholder="e.g., ABC Oil Co.">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Town</label>
+        <input type="text" class="form-input" id="new-company-town" placeholder="e.g., Springfield">
+      </div>
+      <div class="flex gap-md">
+        <div class="form-group" style="flex: 1;">
+          <label class="form-label">Phone</label>
+          <input type="tel" class="form-input" id="new-company-phone" placeholder="(555) 123-4567">
+        </div>
+        <div class="form-group" style="flex: 1;">
+          <label class="form-label">Website</label>
+          <input type="url" class="form-input" id="new-company-website" placeholder="https://...">
+        </div>
+      </div>
+      ${returnToOrderFlow ? '<p class="text-secondary text-sm mt-md">After saving, you\'ll return to the order form with this company selected.</p>' : ''}
+    </form>
+  `;
+
+  document.getElementById('modal-confirm').textContent = 'Save Company';
+  document.getElementById('modal-confirm').onclick = async () => {
+    const name = document.getElementById('new-company-name').value.trim();
+    if (!name) {
+      showToast('Company name is required', 'error');
+      return;
+    }
+
+    const data = {
+      name: name,
+      town: document.getElementById('new-company-town').value.trim() || null,
+      phone: document.getElementById('new-company-phone').value.trim() || null,
+      website: document.getElementById('new-company-website').value.trim() || null,
+      is_market_index: false
+    };
+
+    try {
+      const newCompany = await api.createCompany(data);
+      showToast(`Company "${name}" created successfully`, 'success');
+      closeModal();
+
+      // Refresh the global companies list
+      companies = await api.getCompanies();
+
+      if (returnToOrderFlow) {
+        // Re-open order modal with new company pre-selected
+        await showOrderModal(null, newCompany.id);
+      } else {
+        // Refresh companies page
+        renderCompaniesPage(document.getElementById('page-content'));
+      }
+    } catch (error) {
+      showToast('Failed to create company: ' + error.message, 'error');
+    }
+  };
+  openModal();
 }
 
 async function mergeSelectedCompanies() {
@@ -2130,7 +2202,7 @@ async function showImportPricesModal() {
   openModal();
 }
 
-async function showOrderModal(orderId = null) {
+async function showOrderModal(orderId = null, preselectedCompanyId = null) {
   const isEdit = orderId !== null;
   let order = null;
 
@@ -2152,6 +2224,10 @@ async function showOrderModal(orderId = null) {
     } catch (e) { }
   }
 
+  // Determine selected company ID
+  const selectedCompanyId = preselectedCompanyId || order?.company_id || '';
+  const selectedCompany = companies.find(c => c.id == selectedCompanyId);
+
   document.getElementById('modal-title').textContent = isEdit ? 'Edit Order' : 'Add Order';
   document.getElementById('modal-body').innerHTML = `
     <form id="order-form">
@@ -2165,12 +2241,18 @@ async function showOrderModal(orderId = null) {
       </div>
       <div class="form-group">
         <label class="form-label">Vendor</label>
-        <select class="form-select" id="order-company">
-          <option value="">-- Select Vendor --</option>
-          ${companies.map(c => `
-            <option value="${c.id}" ${order?.company_id === c.id ? 'selected' : ''}>${c.name}</option>
-          `).join('')}
-        </select>
+        <div class="vendor-picker-wrapper" style="position: relative;">
+          <input type="text" class="form-input" id="order-company-search" 
+                 placeholder="Search or type vendor name..." 
+                 value="${selectedCompany?.name || ''}"
+                 autocomplete="off">
+          <input type="hidden" id="order-company" value="${selectedCompanyId}">
+          <div id="company-suggestions" class="autocomplete-dropdown" style="display: none;"></div>
+        </div>
+        <button type="button" class="btn btn-ghost btn-sm mt-sm" onclick="showAddCompanyFromOrder()">
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+          Add New Company
+        </button>
       </div>
       <div class="flex gap-md">
         <div class="form-group" style="flex: 1;">
@@ -2200,6 +2282,51 @@ async function showOrderModal(orderId = null) {
     </form>
     `;
 
+  // Setup company autocomplete
+  const searchInput = document.getElementById('order-company-search');
+  const hiddenInput = document.getElementById('order-company');
+  const suggestionsDiv = document.getElementById('company-suggestions');
+
+  searchInput.addEventListener('input', () => {
+    const query = searchInput.value.toLowerCase().trim();
+    hiddenInput.value = ''; // Clear selection when typing
+
+    if (query.length < 1) {
+      suggestionsDiv.style.display = 'none';
+      return;
+    }
+
+    const matches = companies.filter(c => c.name.toLowerCase().includes(query)).slice(0, 10);
+
+    if (matches.length === 0) {
+      suggestionsDiv.innerHTML = '<div class="autocomplete-item text-secondary">No matches found</div>';
+    } else {
+      suggestionsDiv.innerHTML = matches.map(c => `
+        <div class="autocomplete-item" data-id="${c.id}" data-name="${c.name}">
+          <span class="font-medium">${c.name}</span>
+          ${c.town ? `<span class="text-secondary text-sm"> – ${c.town}</span>` : ''}
+        </div>
+      `).join('');
+    }
+    suggestionsDiv.style.display = 'block';
+  });
+
+  suggestionsDiv.addEventListener('click', (e) => {
+    const item = e.target.closest('.autocomplete-item');
+    if (item && item.dataset.id) {
+      searchInput.value = item.dataset.name;
+      hiddenInput.value = item.dataset.id;
+      suggestionsDiv.style.display = 'none';
+    }
+  });
+
+  // Hide suggestions when clicking outside
+  document.addEventListener('click', (e) => {
+    if (!searchInput.contains(e.target) && !suggestionsDiv.contains(e.target)) {
+      suggestionsDiv.style.display = 'none';
+    }
+  }, { once: true });
+
   // Validate dates on change
   const validateDates = async () => {
     const locationId = document.getElementById('order-location').value;
@@ -2227,6 +2354,15 @@ async function showOrderModal(orderId = null) {
 
   document.getElementById('modal-confirm').onclick = () => saveOrder(orderId);
   openModal();
+}
+
+// Helper to create company from within order flow
+function showAddCompanyFromOrder() {
+  closeModal();
+  // Small delay to allow modal to close
+  setTimeout(() => {
+    showAddCompanyModal(true); // returnToOrderFlow = true
+  }, 100);
 }
 
 async function saveOrder(orderId) {
@@ -2274,7 +2410,7 @@ async function renderLocationsPage(container) {
   // Build unified header
   const headerHtml = generateUnifiedHeader({
     title: 'Locations',
-    subtitle: `${locations.length} configured location${locations.length !== 1 ? 's' : ''}`,
+    subtitle: `${locations.length} configured location${locations.length !== 1 ? 's' : ''} `,
     primaryActions: [
       {
         label: 'Add Location',
@@ -2288,9 +2424,9 @@ async function renderLocationsPage(container) {
 
   container.innerHTML = `
     ${headerHtml}
-    <div class="page-body">
+  <div class="page-body">
 
-      ${locations.length === 0 ? `
+    ${locations.length === 0 ? `
         <div class="empty-state">
           <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
@@ -2320,7 +2456,7 @@ async function renderLocationsPage(container) {
           `).join('')}
         </div>
       `}
-    </div>
+  </div>
   `;
 }
 
