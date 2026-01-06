@@ -1105,6 +1105,31 @@ h4 {
   color: rgba(255, 255, 255, 0.7);
 }
 
+/* Open Order Alert */
+.open-order-alert {
+  background: rgba(251, 191, 36, 0.08);
+  border: 1px solid rgba(251, 191, 36, 0.3);
+  border-radius: var(--radius-md);
+  padding: var(--space-md);
+  margin-bottom: var(--space-md);
+}
+
+.open-order-alert input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent-primary);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.open-order-alert label {
+  user-select: none;
+}
+
+.open-order-alert label:hover {
+  background: var(--bg-secondary) !important;
+}
+
 /* ==================== Buttons ==================== */
 .btn {
   display: inline-flex;

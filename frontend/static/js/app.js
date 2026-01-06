@@ -2278,6 +2278,7 @@ async function showOrderModal(orderId = null, preselectedCompanyId = null) {
                  value="${order?.price_per_gallon || ''}" step="0.001" min="0" required>
         </div>
       </div>
+      <div id="open-order-prompt" style="display: none; margin-top: var(--space-md);"></div>
       <div id="date-validation-msg" class="text-secondary" style="font-size: var(--text-sm);"></div>
     </form>
     `;
@@ -2327,7 +2328,78 @@ async function showOrderModal(orderId = null, preselectedCompanyId = null) {
     }
   }, { once: true });
 
-  // Validate dates on change
+  // Validate dates on change AND check for open orders
+  let openOrderToClose = null; // Track if there's an open order we should close
+
+  const checkOpenOrders = async () => {
+    const locationId = document.getElementById('order-location').value;
+    const startDate = document.getElementById('order-start-date').value;
+    const openOrderSection = document.getElementById('open-order-prompt');
+
+    if (!locationId || !startDate || isEdit) {
+      if (openOrderSection) openOrderSection.style.display = 'none';
+      openOrderToClose = null;
+      return;
+    }
+
+    try {
+      // Fetch all orders to find open ones for this location
+      const allOrders = await api.getOrders();
+      const openOrder = allOrders.find(o =>
+        o.location_id === parseInt(locationId) &&
+        !o.end_date &&
+        o.id !== orderId
+      );
+
+      if (openOrder) {
+        // Calculate suggested end date (1 day before new start)
+        const newStartDateObj = parseLocalDate(startDate);
+        newStartDateObj.setDate(newStartDateObj.getDate() - 1);
+        const suggestedEndDate = getLocalDateString(newStartDateObj);
+
+        openOrderToClose = {
+          id: openOrder.id,
+          startDate: openOrder.start_date,
+          suggestedEndDate: suggestedEndDate
+        };
+
+        if (openOrderSection) {
+          openOrderSection.innerHTML = `
+            <div class="open-order-alert">
+              <div class="flex align-center gap-sm mb-sm">
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--accent-warning);">
+                  <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+                  <line x1="12" y1="9" x2="12" y2="13"></line>
+                  <line x1="12" y1="17" x2="12.01" y2="17"></line>
+                </svg>
+                <strong class="text-warning">Open Order Detected</strong>
+              </div>
+              <p class="text-secondary text-sm mb-sm">
+                A previous order starting <strong class="text-primary">${formatDate(openOrder.start_date)}</strong> 
+                has no end date set. This typically means it's still "active."
+              </p>
+              <label class="flex align-center gap-sm cursor-pointer" style="padding: var(--space-sm); background: var(--bg-tertiary); border-radius: var(--radius-md);">
+                <input type="checkbox" id="close-prev-order" checked>
+                <span>
+                  Close previous order on <strong class="text-primary">${formatDate(suggestedEndDate)}</strong>
+                  <span class="text-secondary text-sm">(1 day before this delivery)</span>
+                </span>
+              </label>
+            </div>
+          `;
+          openOrderSection.style.display = 'block';
+        }
+      } else {
+        openOrderToClose = null;
+        if (openOrderSection) openOrderSection.style.display = 'none';
+      }
+    } catch (e) {
+      console.error('Error checking open orders:', e);
+      openOrderToClose = null;
+      if (openOrderSection) openOrderSection.style.display = 'none';
+    }
+  };
+
   const validateDates = async () => {
     const locationId = document.getElementById('order-location').value;
     const startDate = document.getElementById('order-start-date').value;
@@ -2346,13 +2418,21 @@ async function showOrderModal(orderId = null, preselectedCompanyId = null) {
         msgEl.innerHTML = '';
       }
     }
+
+    // Also check for open orders
+    await checkOpenOrders();
   };
 
   document.getElementById('order-location').addEventListener('change', validateDates);
   document.getElementById('order-start-date').addEventListener('change', validateDates);
   document.getElementById('order-end-date').addEventListener('change', validateDates);
 
-  document.getElementById('modal-confirm').onclick = () => saveOrder(orderId);
+  // Initial check on modal open
+  if (!isEdit && document.getElementById('order-start-date').value) {
+    setTimeout(checkOpenOrders, 100);
+  }
+
+  document.getElementById('modal-confirm').onclick = () => saveOrder(orderId, openOrderToClose);
   openModal();
 }
 
@@ -2365,7 +2445,7 @@ function showAddCompanyFromOrder() {
   }, 100);
 }
 
-async function saveOrder(orderId) {
+async function saveOrder(orderId, openOrderToClose = null) {
   const data = {
     location_id: parseInt(document.getElementById('order-location').value),
     company_id: document.getElementById('order-company').value ? parseInt(document.getElementById('order-company').value) : null,
@@ -2376,6 +2456,21 @@ async function saveOrder(orderId) {
   };
 
   try {
+    // First, close the previous order if user opted in
+    if (openOrderToClose) {
+      const shouldClose = document.getElementById('close-prev-order')?.checked;
+      if (shouldClose) {
+        try {
+          await api.updateOrder(openOrderToClose.id, { end_date: openOrderToClose.suggestedEndDate });
+          showToast(`Previous order closed on ${formatDate(openOrderToClose.suggestedEndDate)}`, 'info');
+        } catch (e) {
+          console.error('Failed to close previous order:', e);
+          // Continue with new order even if this fails
+        }
+      }
+    }
+
+    // Now create/update the main order
     if (orderId) {
       await api.updateOrder(orderId, data);
       showToast('Order updated successfully', 'success');
