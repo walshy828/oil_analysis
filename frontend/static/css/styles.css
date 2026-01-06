@@ -1429,6 +1429,14 @@ h4 {
 }
 
 /* ==================== Utility Classes ==================== */
+/* Chart containers need explicit min-height to prevent collapse */
+.chart-container,
+.chart-wrapper {
+  position: relative;
+  width: 100%;
+  min-height: 300px;
+}
+
 .flex {
   display: flex;
 }

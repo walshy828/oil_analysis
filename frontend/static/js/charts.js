@@ -254,16 +254,13 @@ function createTemperatureChart(ctx, data) {
             },
             scales: {
                 x: {
-                    type: 'time',
-                    time: {
-                        unit: 'month',
-                        displayFormats: {
-                            month: 'MMM yyyy'
-                        },
-                    },
+                    type: 'category', // Simplified from 'time' to ensure bar alignment with labels
                     grid: {
                         display: false,
                     },
+                    ticks: {
+                        color: '#a0a0a0'
+                    }
                 },
                 y: {
                     type: 'linear',
@@ -495,8 +492,8 @@ function createYearlyOrderInsightChart(ctx, data) {
                 {
                     label: 'Total Cost ($)',
                     data: data.map(d => d.total_cost),
-                    backgroundColor: chartColors.primary + '80',
-                    borderColor: chartColors.primary,
+                    backgroundColor: 'rgba(94, 106, 210, 0.8)', // Primary color
+                    borderColor: '#5e6ad2',
                     borderWidth: 1,
                     yAxisID: 'y',
                     order: 2
@@ -504,8 +501,8 @@ function createYearlyOrderInsightChart(ctx, data) {
                 {
                     label: 'Gallons',
                     data: data.map(d => d.total_gallons),
-                    backgroundColor: chartColors.success + '40',
-                    borderColor: chartColors.success,
+                    backgroundColor: 'rgba(16, 185, 129, 0.4)', // Success color
+                    borderColor: '#10b981',
                     borderWidth: 1,
                     yAxisID: 'y', // Share primary axis
                     order: 3
