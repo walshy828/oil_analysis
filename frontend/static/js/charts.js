@@ -221,26 +221,25 @@ function createTemperatureChart(ctx, data) {
             datasets: [
                 {
                     label: 'Heating Demand (HDD)',
-                    data: hddData.map((val, i) => ({ x: temps.labels[i], y: val })),
-                    borderColor: '#f59e0b', // Amber color for Heat Demand
+                    data: hddData, // Use aligned array data matching labels
+                    borderColor: '#f59e0b',
                     backgroundColor: 'rgba(245, 158, 11, 0.2)',
                     fill: true,
                     tension: 0.4,
                     pointRadius: 0,
                     pointHoverRadius: 4,
                     yAxisID: 'y',
-                    order: 2,
-                    spanGaps: false
+                    order: 2
                 },
                 {
                     label: 'Oil Usage (Gal)',
-                    data: orders.map(o => ({ x: o.date, y: o.gallons })),
+                    data: orders.map(o => o.gallons), // Use simple array, assuming orders align with temps/labels
                     type: 'bar',
-                    backgroundColor: 'rgba(59, 130, 246, 0.5)', // Primary Blue with opacity
+                    backgroundColor: 'rgba(59, 130, 246, 0.5)',
                     borderColor: 'rgba(59, 130, 246, 1)',
                     borderWidth: 1,
-                    barPercentage: 0.8,
-                    categoryPercentage: 0.9,
+                    barPercentage: 0.6,
+                    categoryPercentage: 0.8,
                     yAxisID: 'y1',
                     order: 1
                 },
@@ -508,7 +507,7 @@ function createYearlyOrderInsightChart(ctx, data) {
                     backgroundColor: chartColors.success + '40',
                     borderColor: chartColors.success,
                     borderWidth: 1,
-                    yAxisID: 'y', // Share the primary Y axis for volume/cost context
+                    yAxisID: 'y', // Share primary axis
                     order: 3
                 },
                 {
@@ -519,8 +518,8 @@ function createYearlyOrderInsightChart(ctx, data) {
                     backgroundColor: 'transparent',
                     borderWidth: 3,
                     pointRadius: 4,
-                    tension: 0.3,
-                    yAxisID: 'y2',
+                    tension: 0.2,
+                    yAxisID: 'y1', // Use secondary axis (was y2)
                     order: 1
                 }
             ]
@@ -534,15 +533,10 @@ function createYearlyOrderInsightChart(ctx, data) {
                 y: {
                     type: 'linear',
                     position: 'left',
-                    title: { display: true, text: 'Cost / Gallons' },
+                    title: { display: true, text: 'Cost & Gallons' },
                     grid: { color: 'rgba(255,255,255,0.05)' }
                 },
                 y1: {
-                    type: 'linear',
-                    position: 'right',
-                    display: false, // Hidden but used for scaling if needed, or we can just use y
-                },
-                y2: {
                     type: 'linear',
                     position: 'right',
                     title: { display: true, text: 'Avg Price ($/gal)' },
