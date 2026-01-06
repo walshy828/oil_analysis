@@ -960,7 +960,20 @@ function destroyChart(id) {
 }
 
 function storeChart(id, chart) {
-    destroyChart(id);
+    // CRITICAL FIX: Only destroy the OLD tracked instance, don't use DOM lookup.
+    // DOM lookup via Chart.getChart(canvas) would find the NEWLY created chart
+    // and destroy it immediately after creation!
+    // The individual create functions already handle cleanup at their start.
+    if (chartInstances[id]) {
+        try {
+            if (typeof chartInstances[id].destroy === 'function') {
+                chartInstances[id].destroy();
+            }
+        } catch (e) {
+            console.warn(`Error destroying old chart "${id}":`, e);
+        }
+        delete chartInstances[id];
+    }
     chartInstances[id] = chart;
 }
 
