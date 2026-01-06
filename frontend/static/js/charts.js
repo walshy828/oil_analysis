@@ -212,8 +212,12 @@ function createTemperatureChart(ctx, data) {
 
     console.log('Rendering Temp Chart:', { temps: temps.labels.length, orders: orders.length });
 
-    // Safety: Ensure we have explicit height
-    if (ctx.canvas) ctx.canvas.style.height = '300px';
+    // Safety: Handle both Context2D and HTMLCanvasElement
+    const canvas = ctx.canvas || ctx;
+    if (canvas && canvas.style) {
+        canvas.style.height = '300px';
+        canvas.style.width = '100%';
+    }
 
     // Calculate Heating Degree Days (HDD)
     // Base 65°F. HDD = max(0, 65 - avg_temp)
@@ -485,9 +489,17 @@ function createYearlyOrderInsightChart(ctx, data) {
     const existing = Chart.getChart(ctx);
     if (existing) existing.destroy();
 
-    console.log('Rendering Order Chart:', { records: data ? data.length : 0 });
-    // Safety: Ensure we have explicit height
-    if (ctx.canvas) ctx.canvas.style.height = '300px';
+    console.log('Rendering Order Chart:', {
+        records: data ? data.length : 0,
+        sample: data && data.length > 0 ? data[0] : 'empty'
+    });
+
+    // Safety: Handle both Context2D and HTMLCanvasElement
+    const canvas = ctx.canvas || ctx;
+    if (canvas && canvas.style) {
+        canvas.style.height = '300px';
+        canvas.style.width = '100%';
+    }
 
     return new Chart(ctx, {
         type: 'bar',
