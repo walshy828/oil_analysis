@@ -552,6 +552,125 @@ function createYearlyOrderInsightChart(ctx, data) {
 /**
  * Create a Year-over-Year comparison chart
  */
+function createMultiYearComparisonChart(ctx, combinedData, metricLabel) {
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+    // Aesthetic color palette for multiple years
+    const yearColors = [
+        '#5e6ad2', // Primary
+        '#8b5cf6', // Violet
+        '#ec4899', // Pink
+        '#f43f5e', // Rose
+        '#f59e0b', // Amber
+        '#10b981', // Emerald
+        '#06b6d4', // Cyan
+    ];
+
+    const datasets = combinedData.datasets.map((ds, i) => {
+        const color = yearColors[i % yearColors.length];
+        return {
+            label: ds.year.toString(),
+            data: ds.data.map(m => m[metricLabel]),
+            borderColor: color,
+            backgroundColor: i === 0 ? `rgba(${hexToRgb(color)}, 0.1)` : 'transparent',
+            borderWidth: i === 0 ? 3 : 2, // Highlight the newest year
+            fill: i === 0, // Only fill for the primary year to avoid clutter
+            tension: 0.4,
+            pointRadius: i === 0 ? 4 : 2,
+            yAxisID: 'y'
+        };
+    });
+
+    // Expert UX: Average HDD line across selected years to see "normal" vs "outliers"
+    if (combinedData.datasets.length > 0) {
+        const avgHdd = months.map((_, mIdx) => {
+            const hdds = combinedData.datasets.map(ds => ds.data[mIdx]?.total_hdd || 0);
+            return hdds.reduce((a, b) => a + b, 0) / hdds.length;
+        });
+
+        datasets.push({
+            label: 'Avg Heating Demand (HDD)',
+            data: avgHdd,
+            type: 'line',
+            borderColor: 'rgba(255, 255, 255, 0.2)',
+            borderDash: [5, 5],
+            borderWidth: 1,
+            pointRadius: 0,
+            fill: false,
+            yAxisID: 'y1',
+            order: 99
+        });
+    }
+
+    return new Chart(ctx, {
+        type: 'line', // Line is better for multi-year overlay
+        data: {
+            labels: months,
+            datasets: datasets
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: {
+                mode: 'index',
+                intersect: false
+            },
+            plugins: {
+                legend: {
+                    position: 'top',
+                    labels: { color: '#94a3b8', font: { size: 10 } }
+                },
+                tooltip: {
+                    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                    padding: 12,
+                    callbacks: {
+                        label: (ctx) => {
+                            const val = ctx.parsed.y;
+                            let label = ctx.dataset.label + ': ';
+                            if (ctx.datasetIndex < combinedData.datasets.length) {
+                                if (metricLabel.includes('cost') || metricLabel === 'avg_price') {
+                                    label += '$' + val.toFixed(2);
+                                } else {
+                                    label += val.toFixed(1);
+                                }
+                            } else {
+                                label += val.toFixed(0) + ' HDD';
+                            }
+                            return label;
+                        }
+                    }
+                }
+            },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    title: { display: true, text: metricLabel.replace('_', ' ').toUpperCase(), color: '#94a3b8' },
+                    grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                    ticks: { color: '#94a3b8' }
+                },
+                y1: {
+                    position: 'right',
+                    beginAtZero: true,
+                    title: { display: true, text: 'HDD', color: '#f59e0b' },
+                    grid: { display: false },
+                    ticks: { color: '#f59e0b' }
+                },
+                x: {
+                    grid: { display: false },
+                    ticks: { color: '#94a3b8' }
+                }
+            }
+        }
+    });
+}
+
+function hexToRgb(hex) {
+    const r = parseInt(hex.slice(1, 3), 16);
+    const g = parseInt(hex.slice(3, 5), 16);
+    const b = parseInt(hex.slice(5, 7), 16);
+    return `${r}, ${g}, ${b}`;
+}
+
 function createYoYComparisonChart(ctx, data, metricLabel) {
     const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 

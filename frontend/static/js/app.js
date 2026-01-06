@@ -12,7 +12,7 @@ let analyticsStartDate = null;
 let analyticsEndDate = null;
 let analyticsAggregation = 'daily';
 let yoyMetric = 'usage_gallons';
-let yoyYear = new Date().getFullYear();
+let yoyYears = [new Date().getFullYear(), new Date().getFullYear() - 1];
 
 // ==================== Initialization ====================
 
@@ -174,29 +174,60 @@ async function renderPage(page) {
 }
 
 async function renderYoYPage(container) {
-  const data = await api.getYoYComparison(yoyYear);
+  // Sort years for consistency
+  yoyYears.sort((a, b) => b - a);
 
-  // Calculate high-level insights
-  const curTotalGallons = data.current.reduce((sum, m) => sum + m.usage_gallons, 0);
-  const prevTotalGallons = data.previous.reduce((sum, m) => sum + m.usage_gallons, 0);
-  const curTotalHDD = data.current.reduce((sum, m) => sum + m.total_hdd, 0);
-  const prevTotalHDD = data.previous.reduce((sum, m) => sum + m.total_hdd, 0);
-  const curTotalCost = data.current.reduce((sum, m) => sum + m.usage_cost, 0);
-  const prevTotalCost = data.previous.reduce((sum, m) => sum + m.usage_cost, 0);
+  // Fetch all years in parallel
+  const yearDataResults = await Promise.all(
+    yoyYears.map(year => api.getYoYComparison(year))
+  );
 
-  const gallonDiff = curTotalGallons - prevTotalGallons;
-  const costDiff = curTotalCost - prevTotalCost;
-  const hddDiff = curTotalHDD - prevTotalHDD;
+  const combinedData = {
+    years: yoyYears,
+    datasets: yearDataResults.map(res => ({
+      year: res.current_year,
+      data: res.current
+    }))
+  };
 
-  const avgPrice = curTotalGallons > 0 ? curTotalCost / curTotalGallons : 0;
-  const prevAvgPrice = prevTotalGallons > 0 ? prevTotalCost / prevTotalGallons : 0;
-  const priceDiff = avgPrice - prevAvgPrice;
+  // Calculate insights comparing newest selected year vs average of Others
+  const latestYearData = combinedData.datasets[0];
+  const otherYearsData = combinedData.datasets.slice(1);
 
-  // Build year options
-  const yearOptions = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(i => {
-    const y = new Date().getFullYear() - i;
-    return { value: y.toString(), label: y.toString(), selected: y === yoyYear };
-  });
+  const getMetricTotal = (yearSet, metric) => yearSet.data.reduce((sum, m) => sum + (m[metric] || 0), 0);
+
+  const latestStats = {
+    gallons: getMetricTotal(latestYearData, 'usage_gallons'),
+    cost: getMetricTotal(latestYearData, 'usage_cost'),
+    hdd: getMetricTotal(latestYearData, 'total_hdd')
+  };
+
+  let baselineStats = { gallons: 0, cost: 0, hdd: 0 };
+  if (otherYearsData.length > 0) {
+    otherYearsData.forEach(y => {
+      baselineStats.gallons += getMetricTotal(y, 'usage_gallons');
+      baselineStats.cost += getMetricTotal(y, 'usage_cost');
+      baselineStats.hdd += getMetricTotal(y, 'total_hdd');
+    });
+    baselineStats.gallons /= otherYearsData.length;
+    baselineStats.cost /= otherYearsData.length;
+    baselineStats.hdd /= otherYearsData.length;
+  } else {
+    // If only one year selected, use the previous year from the first result as baseline
+    const prevYearData = yearDataResults[0].previous;
+    baselineStats = {
+      gallons: prevYearData.reduce((sum, m) => sum + m.usage_gallons, 0),
+      cost: prevYearData.reduce((sum, m) => sum + m.usage_cost, 0),
+      hdd: prevYearData.reduce((sum, m) => sum + m.total_hdd, 0)
+    };
+  }
+
+  const gallonDiff = latestStats.gallons - baselineStats.gallons;
+  const costDiff = latestStats.cost - baselineStats.cost;
+  const hddDiff = latestStats.hdd - baselineStats.hdd;
+  const latestAvgPrice = latestStats.gallons > 0 ? latestStats.cost / latestStats.gallons : 0;
+  const baselineAvgPrice = baselineStats.gallons > 0 ? baselineStats.cost / baselineStats.gallons : 0;
+  const priceDiff = latestAvgPrice - baselineAvgPrice;
 
   // Build metric options  
   const metricOptions = [
@@ -207,31 +238,24 @@ async function renderYoYPage(container) {
     { value: 'usage_per_day', label: 'Usage (Gal/Day)', selected: yoyMetric === 'usage_per_day' }
   ];
 
+  // Year Selection Pills
+  const availableYears = [];
+  const startYear = new Date().getFullYear();
+  for (let i = 0; i < 6; i++) availableYears.push(startYear - i);
+
   // Build unified header
   const headerHtml = generateUnifiedHeader({
-    title: 'YoY Intelligence',
-    subtitle: `Comparing ${yoyYear} vs ${yoyYear - 1}`,
+    title: 'YoY Comparison',
+    subtitle: `Analyzing trends across ${yoyYears.length} years`,
     primaryActions: [],
     secondaryActions: [],
     controls: [
-      {
-        label: 'Year',
-        items: [
-          {
-            type: 'select',
-            id: 'yoy-year-select',
-            onchange: 'document.getElementById(\"yoy-year-select\").dispatchEvent(new Event(\"change\"))',
-            options: yearOptions
-          }
-        ]
-      },
       {
         label: 'Metric',
         items: [
           {
             type: 'select',
             id: 'yoy-metric-select',
-            onchange: 'document.getElementById(\"yoy-metric-select\").dispatchEvent(new Event(\"change\"))',
             options: metricOptions
           }
         ]
@@ -242,118 +266,103 @@ async function renderYoYPage(container) {
   container.innerHTML = `
     ${headerHtml}
     <div class="page-body">
-
+      
+      <!-- Year Selection Strip -->
+      <div class="card mb-lg glass-effect animate-fade-in">
+        <div class="card-body py-sm flex align-center gap-md">
+           <span class="text-xs font-bold uppercase text-secondary">Historical Context</span>
+           <div class="flex flex-wrap gap-xs">
+              ${availableYears.map(year => {
+    const isSelected = yoyYears.includes(year);
+    return `
+                  <button class="btn btn-sm ${isSelected ? 'btn-primary' : 'btn-ghost'}" 
+                          onclick="toggleYoYYear(${year})">
+                    ${year}
+                  </button>
+                `;
+  }).join('')}
+           </div>
+        </div>
+      </div>
       
       <!-- YoY Synthesis Insights -->
-      <div class="yoy-insight-grid">
-         <div class="correlation-card">
+      <div class="yoy-insight-grid mb-lg">
+         <div class="correlation-card glass-effect animate-fade-in" style="animation-delay: 0.1s">
             <div class="kpi-mini-label">Efficiency Delta</div>
             <div class="kpi-mini-value ${hddDiff > 0 && gallonDiff < 0 ? 'sentiment-good' : (hddDiff < 0 && gallonDiff > 0 ? 'sentiment-bad' : '')}">
-                ${gallonDiff > 0 ? '+' : ''}${gallonDiff.toFixed(0)} gal
+                ${gallonDiff >= 0 ? '+' : ''}${gallonDiff.toFixed(0)} gal
             </div>
             <p class="text-xs text-secondary mt-xs">
-                ${gallonDiff > 0 ? 'Higher consumption' : 'Saved fuel'} vs last year. 
-                ${Math.abs(hddDiff) > 50 ? `Market context: This year was <strong>${hddDiff > 0 ? 'colder' : 'warmer'}</strong> than last.` : 'Weather was comparable.'}
+                ${gallonDiff > 0 ? 'Higher consumption' : 'Saved fuel'} vs baseline. 
+                ${Math.abs(hddDiff) > 50 ? `Context: Seasons were <strong>${hddDiff > 0 ? 'colder' : 'warmer'}</strong>.` : 'Weather was comparable.'}
             </p>
          </div>
-         <div class="correlation-card">
+         <div class="correlation-card glass-effect animate-fade-in" style="animation-delay: 0.2s">
             <div class="kpi-mini-label">Price Impact</div>
             <div class="kpi-mini-value ${priceDiff > 0 ? 'sentiment-bad' : 'sentiment-good'}">
-                ${priceDiff > 0 ? '+' : ''}${formatCurrency(priceDiff)}/gal
+                ${priceDiff >= 0 ? '+' : ''}${formatCurrency(priceDiff)}/gal
             </div>
             <p class="text-xs text-secondary mt-xs">
                 Unit price shift. ${priceDiff > 0 ? 'Market inflation' : 'Market cooling'} 
-                contributed <strong>${formatCurrency(Math.abs(priceDiff * curTotalGallons))}</strong> to your total cost shift.
+                impacted liability by <strong>${formatCurrency(Math.abs(priceDiff * latestStats.gallons))}</strong>.
             </p>
          </div>
-         <div class="correlation-card">
+         <div class="correlation-card glass-effect animate-fade-in" style="animation-delay: 0.3s">
             <div class="kpi-mini-label">Total Spend Shift</div>
             <div class="kpi-mini-value ${costDiff > 0 ? 'sentiment-bad' : 'sentiment-good'}">
-                ${costDiff > 0 ? '+' : ''}${formatCurrency(costDiff)}
+                ${costDiff >= 0 ? '+' : ''}${formatCurrency(costDiff)}
             </div>
             <p class="text-xs text-secondary mt-xs">
-                Combined effect of weather and pricing. ${costDiff > 0 ? 'Higher annual liability.' : 'Annual budget relief.'}
+                Combined effect of weather and pricing. ${costDiff > 0 ? 'Increased annual liability.' : 'Annual budget relief.'}
             </p>
          </div>
       </div>
 
       <div class="grid grid-2-1 gap-lg">
-        <div class="card">
+        <div class="card glass-effect animate-fade-in">
             <div class="card-header">
-                <h3 class="card-title">${yoyMetric.charAt(0).toUpperCase() + yoyMetric.slice(1).replace('_', ' ')} Trend</h3>
+                <h3 class="card-title">${yoyMetric.charAt(0).toUpperCase() + yoyMetric.slice(1).replace('_', ' ')} Overlay</h3>
             </div>
             <div class="card-body">
-                <div class="chart-container" style="height: 350px;">
+                <div class="chart-container" style="height: 400px;">
                     <canvas id="yoy-chart"></canvas>
                 </div>
             </div>
         </div>
 
-        <div class="card">
+        <div class="card glass-effect animate-fade-in">
             <div class="card-header">
                 <h3 class="card-title">Economic Variables</h3>
             </div>
             <div class="card-body">
-                <div class="help-text-box">
+                <div class="help-text-box mb-md">
                     <span class="variable-tag">HDD</span>
-                    <strong>Heating Degree Days:</strong> A measure of how much (in degrees) and for how long (in days) the outside air temperature was below 65°F. 
-                    <br><br>
-                    <span class="text-xs italic">Impact: Higher HDD = More Burn. Use this to debunk price hikes vs weather spikes.</span>
+                    <strong>Heating Degree Days:</strong> Higher HDD = Colder Season = More Burn. Use this to debunk price hikes vs weather spikes.
                 </div>
-                <div class="help-text-box mt-md">
-                    <span class="variable-tag">Cost</span>
-                    <strong>Usage-Based Cost:</strong> Calculated by applying the average local price at the time of burn to your gallons consumed.
+                
+                <div class="table-container">
+                    <table class="data-table text-xs">
+                        <thead>
+                            <tr>
+                                <th>Month</th>
+                                <th>Year</th>
+                                <th>Value</th>
+                                <th>HDD</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${combinedData.datasets.map(ds => ds.data.map(m => `
+                                <tr>
+                                    <td>${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][m.month - 1]}</td>
+                                    <td>${ds.year}</td>
+                                    <td class="mono">${yoyMetric === 'avg_price' || yoyMetric === 'usage_cost' ? formatCurrency(m[yoyMetric]) : (m[yoyMetric] || 0).toFixed(1)}</td>
+                                    <td class="mono">${m.total_hdd.toFixed(0)}</td>
+                                </tr>
+                            `).join('')).join('')}
+                        </tbody>
+                    </table>
                 </div>
             </div>
-        </div>
-      </div>
-
-      <div class="card mt-lg">
-        <div class="card-header">
-            <h3 class="card-title">Monthly Detailed Comparison</h3>
-        </div>
-        <div class="card-body">
-          <div class="table-container">
-            <table class="data-table">
-              <thead>
-                <tr>
-                  <th>Month</th>
-                  <th>${data.current_year}</th>
-                  <th>${data.previous_year}</th>
-                  <th>Change</th>
-                  <th>HDD Shift</th>
-                  <th>Temp (Avg)</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${data.current.map((curr, i) => {
-    const prev = data.previous[i];
-    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    const valCurr = curr[yoyMetric] || 0;
-    const valPrev = prev[yoyMetric] || 0;
-    const diff = valCurr - valPrev;
-    const pct = valPrev !== 0 ? ((diff / valPrev) * 100).toFixed(1) + '%' : '-';
-    const isCurrency = yoyMetric.includes('cost') || yoyMetric === 'avg_price';
-    const hddShift = curr.total_hdd - prev.total_hdd;
-
-    return `
-                    <tr>
-                      <td class="font-bold">${months[i]}</td>
-                      <td class="mono">${isCurrency ? formatCurrency(valCurr) : valCurr.toFixed(1)}</td>
-                      <td class="mono">${isCurrency ? formatCurrency(valPrev) : valPrev.toFixed(1)}</td>
-                      <td class="mono ${diff > 0 ? 'sentiment-bad' : (diff < 0 ? 'sentiment-good' : '')}">
-                        ${diff > 0 ? '+' : ''}${isCurrency ? formatCurrency(diff) : diff.toFixed(1)} (${pct})
-                      </td>
-                      <td class="mono ${hddShift > 0 ? 'sentiment-bad' : 'sentiment-good'}">
-                        ${hddShift > 0 ? '+' : ''}${hddShift.toFixed(0)}
-                      </td>
-                      <td class="mono">${curr.avg_temp ? curr.avg_temp + '°F' : '-'}</td>
-                    </tr>
-                  `;
-  }).join('')}
-              </tbody>
-            </table>
-          </div>
         </div>
       </div>
     </div>
@@ -362,20 +371,34 @@ async function renderYoYPage(container) {
   // Chart
   const chartCtx = document.getElementById('yoy-chart');
   if (chartCtx) {
-    storeChart('yoy', createYoYComparisonChart(chartCtx, data, yoyMetric));
+    storeChart('yoy', createMultiYearComparisonChart(chartCtx, combinedData, yoyMetric));
   }
 
   // Events
-  document.getElementById('yoy-year-select').addEventListener('change', (e) => {
-    yoyYear = parseInt(e.target.value);
-    renderYoYPage(container);
-  });
-
   document.getElementById('yoy-metric-select').addEventListener('change', (e) => {
     yoyMetric = e.target.value;
     renderYoYPage(container);
   });
 }
+
+/**
+ * Toggle year in comparison set
+ */
+window.toggleYoYYear = function (year) {
+  const index = yoyYears.indexOf(year);
+  if (index >= 0) {
+    if (yoyYears.length > 1) {
+      yoyYears.splice(index, 1);
+    } else {
+      showToast("Select at least one year", "warning");
+      return;
+    }
+  } else {
+    yoyYears.push(year);
+  }
+  const container = document.getElementById('page-content');
+  if (container) renderYoYPage(container);
+};
 
 // ==================== Dashboard ====================
 
@@ -1341,7 +1364,7 @@ async function renderCompaniesPage(container) {
                   <tr><td colspan="${showMergedCompanies ? 4 : 5}" class="text-center">No company data found.</td></tr>
                 ` : companiesData.map(c => {
     // Normalize data structure since getCompanies and getLatestPrices return slightly different shapes
-    const id = c.id || c.company_id;
+    const id = c.company_id || c.id;
     const name = c.name || c.company_name;
     const price = c.price_per_gallon ? parseFloat(c.price_per_gallon) : null;
     const date = c.date_reported;
@@ -1457,7 +1480,7 @@ async function renderCompaniesPage(container) {
   // Render sparklines after the table is in the DOM
   if (!showMergedCompanies) {
     companiesData.forEach(c => {
-      const id = c.id || c.company_id;
+      const id = c.company_id || c.id;
       const canvas = document.getElementById(`sparkline-${id}`);
       if (canvas && c.sparkline && c.sparkline.length > 1) {
         createSparkline(canvas, c.sparkline);
@@ -1597,6 +1620,7 @@ async function showCompanyDetailModal(companyId, companyName) {
   try {
     const history = await api.getCompanyPriceHistory(companyId, 365);
     if (!history || history.length === 0) {
+      document.getElementById('detail-latest-price').textContent = '--';
       document.getElementById('company-history-chart').parentElement.innerHTML = '<p class="text-center p-xl text-secondary">No history available.</p>';
       return;
     }
