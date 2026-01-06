@@ -47,6 +47,8 @@ const chartConfig = {
  * Create a price trend line chart
  */
 function createPriceTrendChart(ctx, data) {
+    const existing = Chart.getChart(ctx);
+    if (existing) existing.destroy();
     return new Chart(ctx, {
         type: 'line',
         data: {
@@ -126,6 +128,8 @@ function createPriceTrendChart(ctx, data) {
  * Create an order history bar chart
  */
 function createOrderChart(ctx, data) {
+    const existing = Chart.getChart(ctx);
+    if (existing) existing.destroy();
     const orders = data.orders || [];
 
     return new Chart(ctx, {
@@ -193,6 +197,13 @@ function createOrderChart(ctx, data) {
  * Create a temperature and usage correlation chart
  */
 function createTemperatureChart(ctx, data) {
+    // Expert UX: Ensure we don't leave zombie charts on the shared canvas
+    // This handles race conditions where multiple analytics requests return out of order
+    const existingIcon = Chart.getChart(ctx);
+    if (existingIcon) {
+        existingIcon.destroy();
+    }
+
     const temps = data.temperatures || { labels: [], avg: [] };
     const orders = data.orders || [];
 
@@ -314,6 +325,8 @@ function createTemperatureChart(ctx, data) {
  * Create a price comparison chart for latest prices
  */
 function createPriceComparisonChart(ctx, prices) {
+    const existing = Chart.getChart(ctx);
+    if (existing) existing.destroy();
     const sorted = [...prices].sort((a, b) => a.price_per_gallon - b.price_per_gallon);
 
     return new Chart(ctx, {
@@ -369,6 +382,8 @@ function createPriceComparisonChart(ctx, prices) {
  * Create an order volume and spend insight chart
  */
 function createOrderVolumeInsightChart(ctx, orders) {
+    const existing = Chart.getChart(ctx);
+    if (existing) existing.destroy();
     const sortedOrders = [...orders].sort((a, b) => new Date(a.start_date) - new Date(b.start_date));
 
     return new Chart(ctx, {
@@ -467,6 +482,8 @@ function createOrderVolumeInsightChart(ctx, orders) {
  * Create a Yearly Order Insight chart showing tons of data
  */
 function createYearlyOrderInsightChart(ctx, data) {
+    const existing = Chart.getChart(ctx);
+    if (existing) existing.destroy();
     return new Chart(ctx, {
         type: 'bar',
         data: {
@@ -553,6 +570,8 @@ function createYearlyOrderInsightChart(ctx, data) {
  * Create a Year-over-Year comparison chart
  */
 function createMultiYearComparisonChart(ctx, combinedData, metricLabel) {
+    const existing = Chart.getChart(ctx);
+    if (existing) existing.destroy();
     const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
     // Aesthetic color palette for multiple years
@@ -671,7 +690,84 @@ function hexToRgb(hex) {
     return `${r}, ${g}, ${b}`;
 }
 
+/**
+ * Create a chart comparing multiple companies
+ */
+function createMultiCompanyTrendChart(ctx, datasets) {
+    const existing = Chart.getChart(ctx);
+    if (existing) existing.destroy();
+
+    const colors = [
+        '#3b82f6', // Blue
+        '#10b981', // Emerald
+        '#f59e0b', // Amber
+        '#ef4444', // Red
+        '#8b5cf6', // Violet
+        '#ec4899', // Pink
+        '#06b6d4'  // Cyan
+    ];
+
+    const chartDatasets = datasets.map((ds, i) => {
+        const color = colors[i % colors.length];
+        return {
+            label: ds.name,
+            data: ds.history.map(h => ({ x: h.date, y: h.price })),
+            borderColor: color,
+            backgroundColor: 'transparent',
+            borderWidth: 2,
+            tension: 0.3,
+            pointRadius: 0,
+            pointHoverRadius: 4,
+            spanGaps: true
+        };
+    });
+
+    return new Chart(ctx, {
+        type: 'line',
+        data: {
+            datasets: chartDatasets
+        },
+        options: {
+            ...chartConfig,
+            interaction: {
+                mode: 'index',
+                intersect: false
+            },
+            scales: {
+                x: {
+                    type: 'time',
+                    time: { unit: 'month' },
+                    grid: { display: false }
+                },
+                y: {
+                    title: { display: true, text: 'Price ($/gal)', color: '#a0a0a0' },
+                    grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                    ticks: {
+                        callback: (val) => `$${val.toFixed(2)}`
+                    }
+                }
+            },
+            plugins: {
+                ...chartConfig.plugins,
+                legend: {
+                    display: true,
+                    position: 'top',
+                    labels: { boxWidth: 12, usePointStyle: true, color: '#a0a0a0' }
+                },
+                tooltip: {
+                    ...chartConfig.plugins.tooltip,
+                    callbacks: {
+                        label: (ctx) => `${ctx.dataset.label}: $${ctx.parsed.y.toFixed(3)}`
+                    }
+                }
+            }
+        }
+    });
+}
+
 function createYoYComparisonChart(ctx, data, metricLabel) {
+    const existing = Chart.getChart(ctx);
+    if (existing) existing.destroy();
     const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
     // Expert UX: If viewing gallons/cost, also show HDD to see correlation
@@ -832,9 +928,20 @@ function createSparkline(ctx, data) {
 const chartInstances = {};
 
 function destroyChart(id) {
+    // Phase 1: Explicit Tracking (Preferred)
     if (chartInstances[id]) {
         chartInstances[id].destroy();
         delete chartInstances[id];
+    }
+
+    // Phase 2: Canvas Detection (Nuclear Safety)
+    // If 'id' corresponds to a canvas ID, manually check Chart.js registry
+    const canvas = document.getElementById(id);
+    if (canvas) {
+        const existing = Chart.getChart(canvas);
+        if (existing) {
+            existing.destroy();
+        }
     }
 }
 

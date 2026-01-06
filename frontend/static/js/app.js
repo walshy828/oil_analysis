@@ -1292,6 +1292,13 @@ async function renderCompaniesPage(container) {
     primaryActions: [],
     secondaryActions: [
       {
+        label: 'Compare Selected',
+        icon: '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 20V10"></path><path d="M12 20V4"></path><path d="M6 20v-6"></path></svg>',
+        onclick: 'showCompanyComparisonModal()',
+        id: 'compare-btn',
+        style: 'display: none;'
+      },
+      {
         label: 'Merge Selected',
         icon: headerIcons.merge,
         onclick: 'mergeSelectedCompanies()',
@@ -1339,7 +1346,7 @@ async function renderCompaniesPage(container) {
         ` : ''}
 
         <div class="filter-group" style="flex: 1;">
-          <small class="text-secondary" id="select-hint">${showMergedCompanies ? 'Viewing merged companies' : 'Select 2 companies to merge duplicates'}</small>
+          <small class="text-secondary" id="select-hint">${showMergedCompanies ? 'Viewing merged companies' : 'Select companies to compare or merge duplicates'}</small>
         </div>
       </div>
 
@@ -1521,16 +1528,26 @@ function toggleCompanySelection(companyId, companyName) {
     selectedCompanies.push({ id: companyId, name: companyName });
   }
 
-  // Update merge button visibility
+  // Update button visibility
   const mergeBtn = document.getElementById('merge-btn');
-  if (selectedCompanies.length === 2) {
-    mergeBtn.style.display = 'inline-flex';
-    document.getElementById('select-hint').textContent = `Ready to merge: ${selectedCompanies[0].name} → ${selectedCompanies[1].name} `;
+  const compareBtn = document.getElementById('compare-btn');
+  const hint = document.getElementById('select-hint');
+
+  if (selectedCompanies.length >= 2) {
+    compareBtn.style.display = 'inline-flex';
+    if (selectedCompanies.length === 2) {
+      mergeBtn.style.display = 'inline-flex';
+      hint.textContent = `Ready to merge: ${selectedCompanies[0].name} → ${selectedCompanies[1].name} OR Compare items.`;
+    } else {
+      mergeBtn.style.display = 'none';
+      hint.textContent = `${selectedCompanies.length} companies selected for comparison.`;
+    }
   } else {
+    compareBtn.style.display = 'none';
     mergeBtn.style.display = 'none';
-    document.getElementById('select-hint').textContent = selectedCompanies.length === 1
-      ? `Selected: ${selectedCompanies[0].name}. Select one more to merge.`
-      : 'Select 2 companies to merge duplicates';
+    hint.textContent = selectedCompanies.length === 1
+      ? `Selected: ${selectedCompanies[0].name}. Select more to compare or one more to merge.`
+      : 'Select companies to compare or merge duplicates';
   }
 }
 
@@ -1584,6 +1601,122 @@ async function viewCompanyPrices(companyName) {
     document.getElementById('toggle-history').checked = true;
     applyPriceFilters();
   }, 100);
+}
+
+async function showCompanyComparisonModal() {
+  if (selectedCompanies.length < 2) {
+    showToast('Please select at least 2 companies to compare.', 'warning');
+    return;
+  }
+
+  document.getElementById('modal-title').textContent = 'Company Competitive Analysis';
+  document.getElementById('modal-body').innerHTML = `
+    <div class="p-md">
+      <div id="comparison-summary" class="mb-lg p-md rounded bg-secondary animate-fade-in">
+        <div class="text-xs text-secondary uppercase mb-sm font-bold">Group Snapshot</div>
+        <div class="grid grid-3 gap-md">
+          <div class="comparison-stat">
+            <div class="text-xs text-secondary">Active Count</div>
+            <div class="text-lg font-bold">${selectedCompanies.length} Cos</div>
+          </div>
+          <div class="comparison-stat">
+            <div class="text-xs text-secondary">Avg Group Price</div>
+            <div id="compare-avg-price" class="text-lg font-bold mono">--</div>
+          </div>
+          <div class="comparison-stat">
+             <div class="text-xs text-secondary">Price Delta</div>
+             <div id="compare-delta" class="text-lg font-bold mono">--</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="chart-container" style="height: 400px;">
+        <canvas id="company-comparison-chart"></canvas>
+      </div>
+
+      <div class="mt-lg">
+        <div class="table-container">
+          <table class="data-table text-xs">
+            <thead>
+              <tr>
+                <th>Company</th>
+                <th>Latest Price</th>
+                <th>30d Trend</th>
+                <th>Gap to Min</th>
+              </tr>
+            </thead>
+            <tbody id="compare-tbody">
+              <tr><td colspan="4" class="text-center p-md">Loading historical data...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  `;
+
+  document.getElementById('modal-footer').style.display = 'none';
+  openModal();
+
+  try {
+    // Fetch all histories in parallel
+    const results = await Promise.all(
+      selectedCompanies.map(async (c) => {
+        try {
+          const history = await api.getCompanyPriceHistory(c.id, 365);
+          return { ...c, history: history || [] };
+        } catch (e) {
+          return { ...c, history: [] };
+        }
+      })
+    );
+
+    const validResults = results.filter(r => r.history.length > 0);
+    if (validResults.length === 0) {
+      document.getElementById('compare-tbody').innerHTML = '<tr><td colspan="4" class="text-center p-md">No history available for selected companies.</td></tr>';
+      return;
+    }
+
+    // Calculate Latest Stats
+    const summaryData = validResults.map(r => {
+      const latest = r.history[r.history.length - 1].price;
+      const thirtyDaysAgo = new Date();
+      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+      const startPriceObj = r.history.find(h => new Date(h.date) >= thirtyDaysAgo);
+      const d30Change = startPriceObj ? latest - startPriceObj.price : 0;
+
+      return { ...r, latest, d30Change };
+    });
+
+    const minPrice = Math.min(...summaryData.map(s => s.latest));
+    const maxPrice = Math.max(...summaryData.map(s => s.latest));
+    const avgPrice = summaryData.reduce((sum, s) => sum + s.latest, 0) / summaryData.length;
+
+    document.getElementById('compare-avg-price').textContent = formatCurrency(avgPrice);
+    document.getElementById('compare-delta').textContent = formatCurrency(maxPrice - minPrice);
+
+    // Render Table
+    document.getElementById('compare-tbody').innerHTML = summaryData.map(s => {
+      const gap = s.latest - minPrice;
+      const changeColor = s.d30Change > 0 ? 'text-error' : s.d30Change < 0 ? 'text-success' : '';
+      return `
+        <tr>
+          <td class="font-bold">${s.name}</td>
+          <td class="mono font-bold">${formatCurrency(s.latest)}</td>
+          <td class="mono ${changeColor}">${s.d30Change > 0 ? '+' : ''}${formatCurrency(s.d30Change)}</td>
+          <td class="mono ${gap > 0 ? 'text-error' : 'text-success font-bold'}">${gap > 0 ? '+' : ''}${formatCurrency(gap)}</td>
+        </tr>
+      `;
+    }).join('');
+
+    // Render Chart
+    const ctx = document.getElementById('company-comparison-chart');
+    if (ctx) {
+      storeChart('company-comparison', createMultiCompanyTrendChart(ctx, validResults));
+    }
+
+  } catch (err) {
+    showToast("Comparison failed: " + err.message, "error");
+  }
 }
 
 async function showCompanyDetailModal(companyId, companyName) {
