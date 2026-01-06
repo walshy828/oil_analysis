@@ -2278,6 +2278,10 @@ async function showOrderModal(orderId = null, preselectedCompanyId = null) {
                  value="${order?.price_per_gallon || ''}" step="0.001" min="0" required>
         </div>
       </div>
+      <div id="order-total-display" class="mb-md" style="padding: var(--space-sm) var(--space-md); background: rgba(var(--accent-primary-rgb), 0.05); border-radius: var(--radius-sm); border-left: 3px solid var(--accent-primary);">
+        <span class="text-secondary text-sm">Estimated Total Cost:</span>
+        <span id="order-total-value" class="font-bold text-lg ml-xs">$0.00</span>
+      </div>
       <div id="open-order-prompt" style="display: none; margin-top: var(--space-md);"></div>
       <div id="date-validation-msg" class="text-secondary" style="font-size: var(--text-sm);"></div>
     </form>
@@ -2431,6 +2435,27 @@ async function showOrderModal(orderId = null, preselectedCompanyId = null) {
   if (!isEdit && document.getElementById('order-start-date').value) {
     setTimeout(checkOpenOrders, 100);
   }
+
+  // Calculate and update total cost display
+  const updateOrderTotal = () => {
+    const gallonsInput = document.getElementById('order-gallons');
+    const priceInput = document.getElementById('order-price');
+    const displayEl = document.getElementById('order-total-value');
+
+    if (!gallonsInput || !priceInput || !displayEl) return;
+
+    const gallons = parseFloat(gallonsInput.value) || 0;
+    const price = parseFloat(priceInput.value) || 0;
+    const total = gallons * price;
+
+    displayEl.textContent = formatCurrency(total);
+  };
+
+  document.getElementById('order-gallons').addEventListener('input', updateOrderTotal);
+  document.getElementById('order-price').addEventListener('input', updateOrderTotal);
+
+  // Set initial total
+  updateOrderTotal();
 
   document.getElementById('modal-confirm').onclick = () => saveOrder(orderId, openOrderToClose);
   openModal();
