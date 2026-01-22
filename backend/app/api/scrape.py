@@ -165,6 +165,7 @@ async def get_scraper_types():
             {"id": "newengland_oil", "name": "New England Oil", "description": "Scrapes oil prices from newenglandoil.com"},
             {"id": "market_commodities", "name": "Market Commodities", "description": "NYMEX ULSD & Brent Crude via Yahoo Finance"},
             {"id": "eia_spot_prices", "name": "EIA Spot Prices", "description": "Daily WTI, Brent, and NY Harbor ULSD Spot Prices from EIA.gov"},
+            {"id": "smart_oil_gauge", "name": "Smart Oil Gauge", "description": "Scrapes current oil level and history from Smart Oil Gauge app"},
             {"id": "weather", "name": "Weather Data", "description": "Updates daily temperature history for all locations"},
             {"id": "water", "name": "Water Rates", "description": "Water utility rates (coming soon)", "disabled": True},
             {"id": "electric", "name": "Electric Rates", "description": "Electric utility rates (coming soon)", "disabled": True},

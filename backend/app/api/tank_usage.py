@@ -11,81 +11,9 @@ from app.database import get_db
 from app.models import TankReading, Location, OilPrice, Company, DailyUsage
 from app.services.usage_normalization import UsageNormalizer
 
+from app.services.tank_service import TankService
+
 router = APIRouter()
-
-
-def detect_anomalies(readings: List[dict], tank_capacity: float = 275.0) -> List[dict]:
-    """
-    Process raw readings and flag anomalies:
-    1. Small increases (sensor noise) - flag as anomaly
-    2. Large increases (fill events) - flag as fill
-    3. Post-fill instability (readings near max fluctuating) - flag as unstable
-    
-    Args:
-        readings: List of dicts with 'timestamp' and 'gallons'
-        tank_capacity: Tank capacity in gallons (default 275)
-    
-    Returns:
-        List of processed readings with anomaly flags
-    """
-    if not readings:
-        return []
-    
-    # Sort by timestamp
-    readings = sorted(readings, key=lambda x: x['timestamp'])
-    
-    processed = []
-    fill_threshold = 30.0  # Jump of 30+ gallons indicates fill
-    noise_threshold = 2.0  # Small increase up to 2 gallons is noise
-    max_capacity_threshold = tank_capacity * 0.85  # 85% of capacity = "near full"
-    stability_window = 48  # Hours to check for post-fill stability
-    
-    last_stable_value = None
-    fill_event_time = None
-    
-    for i, reading in enumerate(readings):
-        gallons = reading['gallons']
-        ts = reading['timestamp']
-        
-        flags = {
-            'is_anomaly': False,
-            'is_fill_event': False,
-            'is_post_fill_unstable': False
-        }
-        
-        if i > 0:
-            prev_gallons = readings[i - 1]['gallons']
-            delta = gallons - prev_gallons
-            
-            # Check for fill event
-            if delta > fill_threshold:
-                flags['is_fill_event'] = True
-                fill_event_time = ts
-                last_stable_value = None  # Reset stability tracking
-            
-            # Check for noise (small unexpected increase)
-            elif delta > 0 and delta <= noise_threshold:
-                flags['is_anomaly'] = True
-            
-            # Check for post-fill instability
-            if fill_event_time:
-                hours_since_fill = (ts - fill_event_time).total_seconds() / 3600
-                
-                # Within stability window and near max capacity
-                if hours_since_fill < stability_window and gallons > max_capacity_threshold:
-                    # Check if readings are fluctuating (variance)
-                    if abs(delta) > 1.0:  # Fluctuation > 1 gallon
-                        flags['is_post_fill_unstable'] = True
-                elif hours_since_fill >= stability_window:
-                    # Reset fill event tracking after stability window
-                    fill_event_time = None
-        
-        processed.append({
-            **reading,
-            **flags
-        })
-    
-    return processed
 
 
 @router.post("/upload")
@@ -99,88 +27,14 @@ async def upload_tank_readings(
     Expected format: t,g (timestamp, gallons)
     Deduplicates based on location_id + timestamp.
     """
-    # Verify location exists
-    location = db.query(Location).filter(Location.id == location_id).first()
-    if not location:
-        raise HTTPException(status_code=404, detail="Location not found")
-    
-    tank_capacity = location.tank_capacity or 275.0
-    
     # Parse CSV
     content = await file.read()
     text = content.decode('utf-8')
     
-    reader = csv.DictReader(io.StringIO(text))
-    # Define allowed aliases
+    service = TankService(db)
+    result = service.process_readings_csv(text, location_id)
     
-    TIME_ALIASES = ['t', 'Time', 'timestamp']
-    GALLON_ALIASES = ['g', 'Gallons', 'volume']
-    raw_readings = []
-    for row in reader:
-        try:
-            
-            # Helper to find the first matching key that exists in this row
-            ts_key = next((k for k in TIME_ALIASES if k in row), None)
-            val_key = next((k for k in GALLON_ALIASES if k in row), None)
-
-            if not ts_key or not val_key:
-                continue
-
-            # Handle quoted timestamps
-            ts_str = row[ts_key].strip('"')
-            gallons_str = row[val_key]
-            
-            ts = datetime.strptime(ts_str, '%Y-%m-%d %H:%M:%S')
-            gallons = float(gallons_str)
-            
-            raw_readings.append({
-                'timestamp': ts,
-                'gallons': gallons
-            })
-        except (ValueError, KeyError) as e:
-            continue  # Skip invalid rows
-    
-    if not raw_readings:
-        raise HTTPException(status_code=400, detail="No valid readings found in CSV")
-    
-    # Process and flag anomalies
-    processed = detect_anomalies(raw_readings, tank_capacity)
-    
-    # Get existing timestamps for deduplication
-    existing_timestamps = set(
-        r.timestamp for r in db.query(TankReading.timestamp).filter(
-            TankReading.location_id == location_id
-        ).all()
-    )
-    
-    # Insert new readings
-    new_count = 0
-    skipped_count = 0
-    
-    for reading in processed:
-        if reading['timestamp'] in existing_timestamps:
-            skipped_count += 1
-            continue
-        
-        tank_reading = TankReading(
-            location_id=location_id,
-            timestamp=reading['timestamp'],
-            gallons=reading['gallons'],
-            is_anomaly=reading['is_anomaly'],
-            is_fill_event=reading['is_fill_event'],
-            is_post_fill_unstable=reading['is_post_fill_unstable']
-        )
-        db.add(tank_reading)
-        new_count += 1
-    
-    db.commit()
-    
-    return {
-        "message": "Upload complete",
-        "new_readings": new_count,
-        "skipped_duplicates": skipped_count,
-        "total_processed": len(processed)
-    }
+    return result
 
 
 @router.get("/readings")

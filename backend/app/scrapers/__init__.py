@@ -3,6 +3,7 @@ from app.scrapers.newengland_oil import NewEnglandOilScraper
 from app.scrapers.market_commodities import MarketCommoditiesScraper
 from app.scrapers.eia_spot import EiaSpotPriceScraper
 from app.scrapers.weather import WeatherScraper
+from app.scrapers.smart_oil_gauge import SmartOilGaugeScraper
 
 # Registry of available scrapers
 SCRAPER_REGISTRY = {
@@ -10,6 +11,7 @@ SCRAPER_REGISTRY = {
     "market_commodities": MarketCommoditiesScraper,
     "eia_spot_prices": EiaSpotPriceScraper,
     "weather": WeatherScraper,
+    "smart_oil_gauge": SmartOilGaugeScraper,
 }
 
 
