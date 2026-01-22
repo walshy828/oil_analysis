@@ -40,6 +40,8 @@ services:
       REDIS_URL: redis://redis:6379/0
       SECRET_KEY: ${SECRET_KEY:-dev_secret_key_change_in_prod}
       EIA_API_KEY: ${EIA_API_KEY}
+      SMART_OIL_USERNAME: ${SMART_OIL_USERNAME}
+      SMART_OIL_PASSWORD: ${SMART_OIL_PASSWORD}
     ports:
       - "8028:8028"
     volumes:
@@ -68,6 +70,8 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-oil_prices}:${POSTGRES_PASSWORD:-oil_prices_dev}@${POSTGRES_HOST:-postgres}:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-oil_prices}
       REDIS_URL: redis://redis:6379/0
       EIA_API_KEY: ${EIA_API_KEY}
+      SMART_OIL_USERNAME: ${SMART_OIL_USERNAME}
+      SMART_OIL_PASSWORD: ${SMART_OIL_PASSWORD}
       TZ: America/New_York
     volumes:
       - ./backend:/app

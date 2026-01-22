@@ -1,5 +1,5 @@
 from typing import List, Optional, Dict
-from datetime import datetime
+from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 from app.models import TankReading, Location
 import csv
@@ -181,3 +181,56 @@ class TankService:
             "skipped_duplicates": skipped_count,
             "total_processed": len(processed)
         }
+
+    def add_reading(self, location_id: int, gallons: float, timestamp: datetime) -> TankReading:
+        """
+        Add a single reading with anomaly detection.
+        """
+        # Check if reading already exists
+        existing = self.db.query(TankReading).filter(
+            TankReading.location_id == location_id,
+            TankReading.timestamp == timestamp
+        ).first()
+        
+        if existing:
+            return existing
+
+        # Get recent readings for context (last 48 hours for stability check)
+        start_check = timestamp - timedelta(hours=48)
+        recent_readings = self.db.query(TankReading).filter(
+            TankReading.location_id == location_id,
+            TankReading.timestamp >= start_check
+        ).all()
+        
+        # Convert to dict format expected by detect_anomalies
+        history = [
+            {'timestamp': r.timestamp, 'gallons': r.gallons}
+            for r in recent_readings
+        ]
+        history.append({'timestamp': timestamp, 'gallons': gallons})
+        
+        # Get tank capacity
+        location = self.db.query(Location).filter(Location.id == location_id).first()
+        tank_capacity = location.tank_capacity or 275.0
+        
+        # Run detection
+        processed = self.detect_anomalies(history, tank_capacity)
+        
+        # Find our new reading in processed list
+        result = next(r for r in processed if r['timestamp'] == timestamp)
+        
+        # Create and save
+        new_reading = TankReading(
+            location_id=location_id,
+            timestamp=timestamp,
+            gallons=gallons,
+            is_anomaly=result['is_anomaly'],
+            is_fill_event=result['is_fill_event'],
+            is_post_fill_unstable=result['is_post_fill_unstable']
+        )
+        
+        self.db.add(new_reading)
+        self.db.commit()
+        self.db.refresh(new_reading)
+        
+        return new_reading

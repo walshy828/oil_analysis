@@ -146,10 +146,18 @@ class SmartOilGaugeScraper(BaseScraper):
             if sensor_gallons is not None:
                 current_gallons = float(sensor_gallons)
                 print(f"Current level: {current_gallons} gallons")
+                
+                # Save to DB using TankService
+                ts = datetime.utcnow()
+                service = TankService(db)
+                reading = service.add_reading(location.id, current_gallons, ts)
+                print(f"Saved reading: {reading.id} ({reading.gallons} gal)")
+                
                 records.append({
                     "type": "current_level",
                     "gallons": current_gallons,
-                    "timestamp": datetime.utcnow().isoformat()
+                    "timestamp": ts.isoformat(),
+                    "saved_to_db": True
                 })
             
             # 3. Export History
