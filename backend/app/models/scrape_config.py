@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text, Enum
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text, Enum, JSON
 from datetime import datetime
 import enum
 from app.database import Base
@@ -44,6 +44,10 @@ class ScrapeHistory(Base):
     status = Column(String(50), default="running")  # running, success, failed
     records_scraped = Column(Integer, default=0)
     error_message = Column(Text, nullable=True)
+    
+    # Store summary of scraped data for visibility
+    scraped_data = Column(JSON, nullable=True)  # List of {company, price, date, ...}
+    snapshot_id = Column(String(36), nullable=True, index=True)  # Links to oil_prices.snapshot_id
 
     def __repr__(self):
         return f"<ScrapeHistory(id={self.id}, config_id={self.config_id}, status='{self.status}')>"

@@ -65,12 +65,15 @@ services:
       dockerfile: Dockerfile.worker
     container_name: oil_prices_worker
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-oil_prices}:${POSTGRES_PASSWORD:-oil_prices_dev}@${POSTGRES_HOST:-localhost}:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-oil_prices}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-oil_prices}:${POSTGRES_PASSWORD:-oil_prices_dev}@${POSTGRES_HOST:-postgres}:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-oil_prices}
       REDIS_URL: redis://redis:6379/0
       EIA_API_KEY: ${EIA_API_KEY}
+      TZ: America/New_York
     volumes:
       - ./backend:/app
     depends_on:
+      postgres:
+        condition: service_healthy
       redis:
         condition: service_healthy
     restart: unless-stopped

@@ -79,16 +79,20 @@ async def run_scraper_task(config_id: int, db: Session):
     if not config:
         return
     
-    # Create history record
-    history = ScrapeHistory(config_id=config_id, status="running")
-    db.add(history)
-    db.commit()
-    db.refresh(history)
-    
     # Generate snapshot metadata
     import uuid
     snapshot_id = str(uuid.uuid4())
     scrape_ts = datetime.utcnow()
+    
+    # Create history record with snapshot_id
+    history = ScrapeHistory(
+        config_id=config_id, 
+        status="running",
+        snapshot_id=snapshot_id
+    )
+    db.add(history)
+    db.commit()
+    db.refresh(history)
     
     try:
         # Get the appropriate scraper
@@ -97,10 +101,11 @@ async def run_scraper_task(config_id: int, db: Session):
         # Run the scraper with snapshot metadata
         records = await scraper.scrape(db, snapshot_id=snapshot_id, scraped_at=scrape_ts)
         
-        # Update history
+        # Update history with scraped data summary
         history.status = "success"
         history.records_scraped = len(records)
         history.completed_at = datetime.utcnow()
+        history.scraped_data = records  # Store the scraped records summary
         
         # Update config last run
         config.last_run = scrape_ts

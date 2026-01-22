@@ -1428,6 +1428,48 @@ h4 {
   border-left: 3px solid var(--accent-error);
 }
 
+/* ==================== Execution Log ==================== */
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    max-height: 0;
+    transform: translateY(-10px);
+  }
+
+  to {
+    opacity: 1;
+    max-height: 500px;
+    transform: translateY(0);
+  }
+}
+
+.execution-log-container {
+  padding: var(--space-md);
+}
+
+.execution-log-item {
+  transition: all var(--transition-base);
+}
+
+.execution-log-item:hover {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.scraped-data-card {
+  transition: all var(--transition-fast);
+}
+
+.scraped-data-card:hover {
+  border-color: var(--accent-primary);
+  transform: translateY(-1px);
+}
+
+.execution-detail {
+  border-top: 1px solid var(--border-primary);
+  margin-top: var(--space-sm);
+  padding-top: var(--space-md) !important;
+}
+
 /* ==================== Responsive ==================== */
 @media (max-width: 768px) {
   :root {

@@ -51,6 +51,8 @@ class ScrapeHistoryResponse(BaseModel):
     status: str
     records_scraped: int
     error_message: Optional[str] = None
+    scraped_data: Optional[list] = None
+    snapshot_id: Optional[str] = None
 
     @field_serializer('started_at', 'completed_at')
     def serialize_dt(self, dt: datetime, _info):

@@ -3769,8 +3769,13 @@ function renderScraperCard(config) {
                 <div class="flex items-center gap-xs mb-xs" title="Schedule">
                      <span style="opacity:0.7">Run:</span> <span class="mono">${formatSchedule(config.schedule_type, config.schedule_value)}</span>
                 </div>
-                 <div class="flex items-center gap-xs" title="Last Run">
+                <div class="flex items-center gap-xs mb-xs" title="Last Run">
                      <span style="opacity:0.7">Last:</span> <span class="mono">${config.last_run ? formatDateTime(config.last_run) : 'Never'}</span>
+                </div>
+                <div class="flex items-center gap-xs" title="Next Run">
+                     <span style="opacity:0.7">Next:</span> <span class="mono" style="color: var(--accent-primary); font-weight: 500;">
+                        ${config.next_run ? formatDateTime(config.next_run) : 'Pending...'}
+                     </span>
                 </div>
             </div>
 
@@ -3798,7 +3803,6 @@ async function loadScrapeHistoryTable() {
 
   try {
     const { configId, days } = scrapeHistoryFilters;
-    // Assuming api.getScrapeHistory supports days parameter now
     const history = await api.getScrapeHistory(configId || null, days, 50);
 
     // Update badge
@@ -3810,53 +3814,159 @@ async function loadScrapeHistoryTable() {
 
     if (history.length === 0) {
       container.innerHTML = `
-                <div class="empty-state p-xl">
-                    <p class="empty-state-text">No history found for selected filters.</p>
-                </div>`;
+        <div class="empty-state p-xl">
+          <p class="empty-state-text">No history found for selected filters.</p>
+        </div>`;
       return;
     }
 
+    // Modern execution log with expandable rows
     container.innerHTML = `
-            <div class="table-container" style="max-height: 500px; overflow-y: auto;">
-              <table class="data-table">
-                <thead style="position: sticky; top: 0; background: var(--bg-primary); z-index: 1;">
-                  <tr>
-                    <th>Date</th>
-                    <th>Scraper</th>
-                    <th>Status</th>
-                    <th>Records</th>
-                    <th>Duration</th>
-                    <th>Details</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${history.map(h => {
+      <div class="execution-log-container" style="max-height: 600px; overflow-y: auto;">
+        ${history.map((h, idx) => {
       const configName = window.scraperConfigs?.find(c => c.id === h.config_id)?.name || 'Unknown';
       const duration = h.completed_at ? ((new Date(h.completed_at) - new Date(h.started_at)) / 1000).toFixed(1) + 's' : '-';
+      const hasData = h.scraped_data && h.scraped_data.length > 0;
+      const statusColor = h.status === 'success' ? 'var(--success-color)' : h.status === 'failed' ? 'var(--error-color)' : 'var(--info-color)';
+
       return `
-                    <tr>
-                      <td class="mono" style="font-size: 13px;">${formatDateTime(h.started_at)}</td>
-                      <td style="font-weight: 500;">${configName}</td>
-                      <td>
-                        <span class="badge badge-${h.status === 'success' ? 'success' : h.status === 'failed' ? 'error' : 'info'}">
-                          ${h.status}
-                        </span>
-                      </td>
-                      <td class="mono">${h.records_scraped}</td>
-                      <td class="mono text-secondary">${duration}</td>
-                      <td class="text-secondary text-sm" style="max-width: 300px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${h.error_message || ''}">
-                        ${h.error_message || ''}
-                      </td>
-                    </tr>
-                  `}).join('')}
-                </tbody>
-              </table>
+            <div class="execution-log-item" style="border-left: 3px solid ${statusColor}; margin-bottom: 8px; border-radius: 8px; background: var(--bg-secondary); overflow: hidden;">
+              <!-- Header Row (Clickable) -->
+              <div class="execution-log-header" 
+                   style="display: flex; align-items: center; padding: 12px 16px; cursor: ${hasData ? 'pointer' : 'default'}; gap: 16px; transition: background 0.2s;"
+                   ${hasData ? `onclick="toggleExecutionDetail(${h.id})"` : ''}
+                   onmouseover="this.style.background='var(--bg-tertiary)'" 
+                   onmouseout="this.style.background='transparent'">
+                
+                <!-- Expand Icon -->
+                ${hasData ? `
+                  <div class="expand-icon" id="expand-icon-${h.id}" style="transition: transform 0.2s; color: var(--text-secondary);">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <polyline points="9,18 15,12 9,6"></polyline>
+                    </svg>
+                  </div>
+                ` : '<div style="width: 16px;"></div>'}
+                
+                <!-- Date/Time -->
+                <div style="min-width: 140px;">
+                  <div class="mono text-sm font-medium">${formatDateTime(h.started_at)}</div>
+                </div>
+                
+                <!-- Scraper Name -->
+                <div style="flex: 1; font-weight: 500;">${configName}</div>
+                
+                <!-- Status Badge -->
+                <div>
+                  <span class="badge badge-${h.status === 'success' ? 'success' : h.status === 'failed' ? 'error' : 'info'}" 
+                        style="font-size: 11px; padding: 3px 8px;">
+                    ${h.status.toUpperCase()}
+                  </span>
+                </div>
+                
+                <!-- Records Count -->
+                <div style="min-width: 80px; text-align: right;">
+                  <span class="mono font-bold" style="font-size: 16px;">${h.records_scraped}</span>
+                  <span class="text-xs text-secondary"> records</span>
+                </div>
+                
+                <!-- Duration -->
+                <div style="min-width: 60px; text-align: right;" class="mono text-secondary text-sm">
+                  ${duration}
+                </div>
+                
+                ${h.error_message ? `
+                  <div style="min-width: 24px;" title="${h.error_message}">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--error-color)" stroke-width="2">
+                      <circle cx="12" cy="12" r="10"></circle>
+                      <line x1="12" y1="8" x2="12" y2="12"></line>
+                      <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                    </svg>
+                  </div>
+                ` : ''}
+              </div>
+              
+              <!-- Expandable Details -->
+              ${hasData ? `
+                <div id="execution-detail-${h.id}" class="execution-detail" 
+                     style="display: none; padding: 0 16px 16px 48px; animation: slideDown 0.2s ease;">
+                  
+                  ${h.snapshot_id ? `
+                    <div class="text-xs text-secondary mb-sm" style="font-family: monospace;">
+                      Snapshot ID: ${h.snapshot_id.substring(0, 8)}...
+                    </div>
+                  ` : ''}
+                  
+                  <!-- Scraped Data Grid -->
+                  <div class="scraped-data-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; max-height: 300px; overflow-y: auto;">
+                    ${h.scraped_data.map(item => `
+                      <div class="scraped-data-card" style="background: var(--bg-primary); border-radius: 6px; padding: 10px 12px; border: 1px solid var(--border-color);">
+                        <div class="font-medium text-sm" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${item.company}">
+                          ${item.company}
+                        </div>
+                        <div class="flex flex-between align-center mt-xs">
+                          <span class="mono font-bold" style="color: var(--success-color); font-size: 15px;">
+                            $${typeof item.price === 'number' ? item.price.toFixed(2) : item.price}
+                          </span>
+                          <span class="text-xs text-secondary">${item.date || ''}</span>
+                        </div>
+                      </div>
+                    `).join('')}
+                  </div>
+                  
+                  <!-- Summary Stats -->
+                  <div class="flex gap-lg mt-md pt-md" style="border-top: 1px solid var(--border-color);">
+                    ${(() => {
+            const prices = h.scraped_data.filter(d => d.price).map(d => parseFloat(d.price));
+            if (prices.length === 0) return '';
+            const min = Math.min(...prices);
+            const max = Math.max(...prices);
+            const avg = prices.reduce((a, b) => a + b, 0) / prices.length;
+            return `
+                        <div class="text-sm">
+                          <span class="text-secondary">Low:</span> 
+                          <span class="mono font-medium" style="color: var(--success-color);">$${min.toFixed(2)}</span>
+                        </div>
+                        <div class="text-sm">
+                          <span class="text-secondary">Avg:</span> 
+                          <span class="mono font-medium">$${avg.toFixed(2)}</span>
+                        </div>
+                        <div class="text-sm">
+                          <span class="text-secondary">High:</span> 
+                          <span class="mono font-medium" style="color: var(--error-text);">$${max.toFixed(2)}</span>
+                        </div>
+                      `;
+          })()}
+                  </div>
+                </div>
+              ` : ''}
+              
+              ${h.error_message ? `
+                <div style="padding: 8px 16px 12px 48px; color: var(--error-text); font-size: 13px;">
+                  <strong>Error:</strong> ${h.error_message}
+                </div>
+              ` : ''}
             </div>
-        `;
+          `;
+    }).join('')}
+      </div>
+    `;
   } catch (err) {
     container.innerHTML = `<div class="text-error p-md">Failed to load history: ${err.message}</div>`;
   }
 }
+
+// Toggle execution detail expansion
+function toggleExecutionDetail(historyId) {
+  const detail = document.getElementById(`execution-detail-${historyId}`);
+  const icon = document.getElementById(`expand-icon-${historyId}`);
+
+  if (detail && icon) {
+    const isHidden = detail.style.display === 'none';
+    detail.style.display = isHidden ? 'block' : 'none';
+    icon.style.transform = isHidden ? 'rotate(90deg)' : 'rotate(0deg)';
+  }
+}
+
 
 function updateHistoryFilter(key, value) {
   if (key === 'days') value = parseInt(value) || 0;
