@@ -776,7 +776,7 @@ async function runQuickScrape() {
 
 let selectedPrices = new Set();
 let currentPricesData = [];
-let showLatestScrapeOnly = false;
+let showPriceHistory = false;
 let groupPricesByCompany = false;
 let viewType = 'local';
 let scrapeHistoryFilters = { configId: '', days: 30 };
@@ -825,10 +825,10 @@ async function renderPricesPage(container) {
         items: [
           {
             type: 'toggle',
-            id: 'toggle-latest-scrape',
-            label: 'Latest Batch',
-            checked: showLatestScrapeOnly,
-            onchange: 'toggleLatestScrape()'
+            id: 'toggle-history',
+            label: 'Show Full History',
+            checked: showPriceHistory,
+            onchange: 'togglePriceHistory()'
           },
           {
             type: 'toggle',
@@ -836,13 +836,6 @@ async function renderPricesPage(container) {
             label: 'Group Companies',
             checked: groupPricesByCompany,
             onchange: 'toggleGroupCompany()'
-          },
-          {
-            type: 'toggle',
-            id: 'toggle-history',
-            label: 'Show History',
-            checked: false,
-            onchange: 'togglePriceHistory()'
           }
         ]
       },
@@ -944,16 +937,16 @@ async function renderPricesPage(container) {
 
 async function loadPrices(filters = {}) {
   try {
-    const showHistory = document.getElementById('toggle-history')?.checked;
     const sortBy = document.getElementById('price-sort-by')?.value || 'price';
     const sortOrder = document.getElementById('price-sort-order')?.value || 'asc';
 
-    // Ensure type is in filters
     if (!filters.type) filters.type = viewType;
     filters.sort_by = sortBy;
     filters.order = sortOrder;
 
-    let rawData = showHistory ? await api.getOilPrices(filters) : await api.getLatestPrices(filters);
+    // Default view: latest batch (one price per company from most recent snapshot).
+    // "Show Full History" loads all historical records.
+    let rawData = showPriceHistory ? await api.getOilPrices(filters) : await api.getLatestPrices(filters);
 
     currentPricesData = rawData;
     selectedPrices.clear();
@@ -1056,11 +1049,7 @@ function applyPriceFilters() {
 }
 
 function togglePriceHistory() {
-  applyPriceFilters();
-}
-
-function toggleLatestScrape() {
-  showLatestScrapeOnly = document.getElementById('toggle-latest-scrape').checked;
+  showPriceHistory = document.getElementById('toggle-history')?.checked ?? false;
   loadPrices(getCurrentFilters());
 }
 

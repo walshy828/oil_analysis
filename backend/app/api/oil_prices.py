@@ -75,49 +75,71 @@ async def get_latest_prices(
     type: str = Query("local", regex="^(local|market|all)$"),
     sort_by: str = Query("price", regex="^(price|name|date)$"),
     order: str = Query("asc", regex="^(asc|desc)$"),
+    stale_days: int = Query(30, description="Filter out companies with no price update in this many days"),
     db: Session = Depends(get_db)
 ):
-    """Get the most recent price snapshot for every company."""
+    """
+    Return the most recent price per company from the latest scrape batch.
+
+    Strategy:
+    1. Find the latest snapshot_id that actually contains prices for the
+       requested type (local/market/all).  This avoids a cross-type mismatch
+       where, e.g., the globally newest snapshot is from an EIA run that has
+       no local prices, causing empty results.
+    2. Return all distinct-per-company prices from that snapshot.
+    3. Fall back to DISTINCT ON with a date_reported staleness cut-off when
+       no snapshot data exists for this type (e.g., prices were CSV-imported).
+    """
     from sqlalchemy import text
+    from datetime import timedelta
 
-    # Identify the latest snapshot
-    latest_snapshot = db.query(OilPrice.snapshot_id).filter(
-        OilPrice.snapshot_id.isnot(None)
-    ).order_by(desc(OilPrice.scraped_at)).first()
-
-    latest_ts = None
-    if latest_snapshot:
-        latest_snapshot_id = latest_snapshot[0]
-        latest_ts = db.query(OilPrice.scraped_at).filter(
-            OilPrice.snapshot_id == latest_snapshot_id
-        ).limit(1).scalar()
+    # Build a type-scoped WHERE fragment (no user input interpolated directly)
+    if type == "local":
+        type_sql = "AND c.is_market_index = FALSE"
+    elif type == "market":
+        type_sql = "AND c.is_market_index = TRUE"
     else:
-        latest_snapshot_id = None
-        latest_ts = db.query(func.max(OilPrice.scraped_at)).scalar()
+        type_sql = ""
 
-    where_clause = (
-        "WHERE c.merged_into_id IS NULL "
-        "AND (:type = 'all' OR (:type = 'local' AND c.is_market_index = false) "
-        "OR (:type = 'market' AND c.is_market_index = true))"
-    )
-    params = {"type": type}
+    # Find the latest snapshot that has data for this specific type
+    latest_snapshot_id = db.execute(text(f"""
+        SELECT p.snapshot_id
+        FROM oil_prices p
+        JOIN companies c ON p.company_id = c.id
+        WHERE p.snapshot_id IS NOT NULL
+          AND c.merged_into_id IS NULL
+          {type_sql}
+        ORDER BY p.scraped_at DESC NULLS LAST
+        LIMIT 1
+    """)).scalar()
+
+    params: dict = {}
 
     if latest_snapshot_id:
-        where_clause += " AND p.snapshot_id = :snapshot_id"
+        where_clause = f"""
+            WHERE c.merged_into_id IS NULL
+              {type_sql}
+              AND p.snapshot_id = :snapshot_id
+        """
         params["snapshot_id"] = latest_snapshot_id
-    elif latest_ts:
-        from datetime import timedelta
-        where_clause += " AND p.scraped_at >= :ts_start AND p.scraped_at <= :ts_end"
-        params["ts_start"] = latest_ts - timedelta(minutes=1)
-        params["ts_end"] = latest_ts + timedelta(minutes=1)
+    else:
+        # No scraper-generated data for this type — fall back to most-recent
+        # price per company, filtered by staleness.
+        cutoff = date.today() - timedelta(days=stale_days)
+        where_clause = f"""
+            WHERE c.merged_into_id IS NULL
+              {type_sql}
+              AND p.date_reported >= :cutoff
+        """
+        params["cutoff"] = cutoff
 
     query_text = f"""
         SELECT DISTINCT ON (p.company_id)
             p.id,
             p.company_id,
-            c.name  AS company_name,
-            c.website AS company_website,
-            c.phone   AS company_phone,
+            c.name       AS company_name,
+            c.website    AS company_website,
+            c.phone      AS company_phone,
             p.price_per_gallon,
             p.town,
             p.date_reported,
@@ -126,7 +148,7 @@ async def get_latest_prices(
         FROM oil_prices p
         JOIN companies c ON p.company_id = c.id
         {where_clause}
-        ORDER BY p.company_id, p.scraped_at DESC
+        ORDER BY p.company_id, p.scraped_at DESC NULLS LAST, p.date_reported DESC
     """
     rows = db.execute(text(query_text), params).fetchall()
 
