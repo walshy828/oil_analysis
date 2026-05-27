@@ -2876,10 +2876,15 @@ async function renderUsagePage(container) {
           <div class="usage-stat-content">
             <div class="usage-stat-label">Import Data</div>
             <input type="file" id="tank-csv-file" accept=".csv" style="display:none" onchange="handleTankCsvUpload(this)">
-            <button class="btn btn-sm" style="background: rgba(139,92,246,0.15); color: #8b5cf6; border: none; margin-top: 4px;" onclick="document.getElementById('tank-csv-file').click()">
-              Upload CSV
-            </button>
-            <div class="usage-stat-sub">Smart Oil Gauge format</div>
+            <div style="display:flex; flex-direction:column; gap:6px; margin-top:4px;">
+              <button class="btn btn-sm" style="background: rgba(139,92,246,0.15); color: #8b5cf6; border: none;" onclick="document.getElementById('tank-csv-file').click()">
+                Upload CSV
+              </button>
+              <button class="btn btn-sm" id="sync-gauge-btn" style="background: rgba(16,185,129,0.15); color: #10b981; border: none;" onclick="handleSmartOilGaugeSync()">
+                Sync Smart Oil Gauge
+              </button>
+            </div>
+            <div class="usage-stat-sub" id="sync-gauge-status">Last 30 days auto-imported</div>
           </div>
         </div>
       </div>
@@ -3519,6 +3524,31 @@ async function handleTankCsvUpload(input) {
   input.value = '';
 }
 
+async function handleSmartOilGaugeSync() {
+  const btn = document.getElementById('sync-gauge-btn');
+  const status = document.getElementById('sync-gauge-status');
+
+  if (btn) { btn.disabled = true; btn.textContent = 'Syncing…'; }
+  if (status) status.textContent = 'Connecting to Smart Oil Gauge…';
+
+  try {
+    showToast('Syncing from Smart Oil Gauge…', 'info');
+    const result = await api.syncSmartOilGauge();
+
+    const gallons = result.current_gallons != null ? `${result.current_gallons} gal` : 'unknown';
+    const newReadings = result.history_new_readings || 0;
+
+    showToast(`Sync complete — ${gallons} current, ${newReadings} new history readings`, 'success');
+    if (status) status.textContent = `Synced: ${gallons} · ${newReadings} new readings`;
+    loadUsageData();
+  } catch (err) {
+    showToast('Sync failed: ' + err.message, 'error');
+    if (status) status.textContent = 'Sync failed — check credentials in .env';
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Sync Smart Oil Gauge'; }
+  }
+}
+
 function renderUsageDetailTable(readings) {
   const container = document.getElementById('usage-detail-container');
   if (!container) return;
@@ -4065,6 +4095,36 @@ async function importEiaCrackSpreadBulk() {
   }
 }
 
+const SCRAPER_DEFAULTS = {
+  smart_oil_gauge: {
+    url: 'https://app.smartoilgauge.com',
+    name: 'Smart Oil Gauge',
+    schedule_value: '07:00',
+  },
+  newengland_oil: {
+    url: 'https://www.newenglandoil.com/massachusetts/zone11.asp?x=0',
+    schedule_value: '09:00',
+  },
+  weather: { url: 'https://archive-api.open-meteo.com', schedule_value: '06:00' },
+  eia_spot_prices: { url: 'https://api.eia.gov', schedule_value: '08:00' },
+  market_commodities: { url: 'https://finance.yahoo.com', schedule_value: '08:30' },
+};
+
+function updateScrapeModalForType(scraperType) {
+  const defaults = SCRAPER_DEFAULTS[scraperType] || {};
+  const urlInput = document.getElementById('scrape-url');
+  const urlGroup = document.getElementById('scrape-url-group');
+  const nameInput = document.getElementById('scrape-name');
+  const credNote = document.getElementById('scrape-cred-note');
+
+  if (urlInput && defaults.url) urlInput.value = defaults.url;
+  if (nameInput && !nameInput.value && defaults.name) nameInput.value = defaults.name;
+
+  const isGauge = scraperType === 'smart_oil_gauge';
+  if (urlGroup) urlGroup.style.display = isGauge ? 'none' : '';
+  if (credNote) credNote.style.display = isGauge ? 'block' : 'none';
+}
+
 async function showScrapeConfigModal(configId = null) {
   const isEdit = configId !== null;
   let config = null;
@@ -4073,6 +4133,10 @@ async function showScrapeConfigModal(configId = null) {
     const configs = await api.getScrapeConfigs();
     config = configs.find(c => c.id === configId);
   }
+
+  const currentType = config?.scraper_type || 'newengland_oil';
+  const isGauge = currentType === 'smart_oil_gauge';
+  const defaultUrl = SCRAPER_DEFAULTS[currentType]?.url || '';
 
   document.getElementById('modal-title').textContent = isEdit ? 'Edit Scraper' : 'Add Scraper';
   document.getElementById('modal-body').innerHTML = `
@@ -4083,15 +4147,22 @@ async function showScrapeConfigModal(configId = null) {
       </div>
       <div class="form-group">
         <label class="form-label">Scraper Type *</label>
-        <select class="form-select" id="scrape-type" required ${isEdit ? 'disabled' : ''}>
+        <select class="form-select" id="scrape-type" required ${isEdit ? 'disabled' : ''} onchange="updateScrapeModalForType(this.value)">
           ${(window.scraperTypes || []).filter(t => !t.disabled).map(t => `
-            <option value="${t.id}" ${config?.scraper_type === t.id ? 'selected' : ''}>${t.name}</option>
+            <option value="${t.id}" ${currentType === t.id ? 'selected' : ''}>${t.name}</option>
           `).join('')}
         </select>
       </div>
-      <div class="form-group">
+      <div class="form-group" id="scrape-url-group" style="display:${isGauge ? 'none' : ''}">
         <label class="form-label">URL *</label>
-        <input type="url" class="form-input" id="scrape-url" value="${config?.url || 'https://www.newenglandoil.com/massachusetts/zone11.asp?x=0'}" required>
+        <input type="url" class="form-input" id="scrape-url" value="${config?.url || defaultUrl}">
+      </div>
+      <div id="scrape-cred-note" class="form-group" style="display:${isGauge ? 'block' : 'none'}">
+        <div style="background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:8px;padding:12px;font-size:13px;color:var(--text-secondary);">
+          <strong style="color:var(--text-primary);">Credentials via environment variables</strong><br>
+          Set <code>SMART_OIL_USERNAME</code> and <code>SMART_OIL_PASSWORD</code> in your <code>.env</code> file.<br>
+          No URL needed — the scraper logs in automatically.
+        </div>
       </div>
       <div class="form-group">
         <label class="form-label">Schedule Type</label>
@@ -4103,7 +4174,7 @@ async function showScrapeConfigModal(configId = null) {
       </div>
       <div class="form-group">
         <label class="form-label">Schedule Value</label>
-        <input type="text" class="form-input" id="scrape-schedule-value" value="${config?.schedule_value || '09:00'}" placeholder="e.g., 09:00 for daily, 4 for interval">
+        <input type="text" class="form-input" id="scrape-schedule-value" value="${config?.schedule_value || SCRAPER_DEFAULTS[currentType]?.schedule_value || '09:00'}" placeholder="e.g., 09:00 for daily, 4 for interval">
         <small class="text-muted">For daily: time (09:00), for hourly: minute (30), for interval: hours (4)</small>
       </div>
       <div class="form-group">
@@ -4112,7 +4183,7 @@ async function showScrapeConfigModal(configId = null) {
           <span>Enabled</span>
         </label>
       </div>
-    </form >
+    </form>
     `;
 
   document.getElementById('modal-confirm').onclick = () => saveScrapeConfig(configId);
@@ -4120,10 +4191,16 @@ async function showScrapeConfigModal(configId = null) {
 }
 
 async function saveScrapeConfig(configId) {
+  const scraperType = document.getElementById('scrape-type').value;
+  const urlField = document.getElementById('scrape-url');
+  const url = scraperType === 'smart_oil_gauge'
+    ? 'https://app.smartoilgauge.com'
+    : (urlField?.value || '');
+
   const data = {
     name: document.getElementById('scrape-name').value,
-    scraper_type: document.getElementById('scrape-type').value,
-    url: document.getElementById('scrape-url').value,
+    scraper_type: scraperType,
+    url,
     schedule_type: document.getElementById('scrape-schedule-type').value,
     schedule_value: document.getElementById('scrape-schedule-value').value,
     enabled: document.getElementById('scrape-enabled').checked,

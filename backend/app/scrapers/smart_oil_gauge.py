@@ -169,88 +169,43 @@ class SmartOilGaugeScraper(BaseScraper):
                 print("Could not find registration_id for export")
             else:
                 print(f"Exporting data for registration_id: {registration_id}")
-                # Construct export request
                 end_date = datetime.now()
                 start_date = end_date - timedelta(days=30)
-                
-                # GET export page first to parse form
-                export_page_url = f"{export_url}?registration_id={registration_id}"
-                print(f"Fetching export page: {export_page_url}...")
-                exp_resp = await client.get(export_page_url)
-                
-                soup = BeautifulSoup(exp_resp.text, 'lxml')
-                form = soup.find('form')
-                
-                if not form:
-                     print("Could not find export form")
-                else:
-                    action = form.get('action')
-                    if action:
-                        if action.startswith('http'):
-                            post_url = action
-                        else:
-                            from urllib.parse import urljoin
-                            post_url = urljoin(export_url, action)
+
+                # POST directly to the export endpoint with registration_id in query string.
+                # The form's submit button is named "submit" (id="do-export"), value="Export".
+                export_post_url = f"{export_url}?registration_id={registration_id}"
+                export_form_data = {
+                    'registration_id': registration_id,
+                    'startdate': start_date.strftime("%Y-%m-%d"),
+                    'enddate': end_date.strftime("%Y-%m-%d"),
+                    'submit': 'Export',
+                }
+                print(f"Posting export to {export_post_url}...")
+                export_response = await client.post(
+                    export_post_url,
+                    data=export_form_data,
+                    follow_redirects=True
+                )
+
+                if export_response.status_code == 200:
+                    content_type = export_response.headers.get('content-type', '')
+                    is_csv = 'csv' in content_type
+
+                    if is_csv:
+                        csv_content = export_response.text
+                        print(f"CSV Content Preview: {csv_content[:200]}")
+
+                        service = TankService(db)
+                        result = service.process_readings_csv(csv_content, location.id)
+                        print(f"Import result: {result}")
+
+                        records.append({
+                            "type": "history_export",
+                            "new_readings": result.get('new_readings'),
+                            "total_processed": result.get('total_processed')
+                        })
                     else:
-                        post_url = export_page_url
-                        
-                    data = {}
-                    for inp in form.find_all('input'):
-                         name = inp.get('name')
-                         if name:
-                             data[name] = inp.get('value', '')
-                    
-                    # Update fields
-                    data['startdate'] = start_date.strftime("%Y-%m-%d")
-                    data['enddate'] = end_date.strftime("%Y-%m-%d")
-                    # Check if there is a submit button with a name
-                    submit_btn = form.find('button', attrs={'type': 'submit'}) or form.find('input', attrs={'type': 'submit'})
-                    if submit_btn and submit_btn.get('name'):
-                         data[submit_btn.get('name')] = submit_btn.get('value', 'Export')
-                    elif 'do_export' not in data: 
-                         # Fallback guess if not found
-                         data['do_export'] = 'Export'
-                    
-                    # Check method
-                    method = form.get('method', 'post').lower()
-                    
-                    print(f"Posting export to {post_url} ({method}) with params: {list(data.keys())}")
-                    
-                    # Update referer for this request
-                    client.headers["Referer"] = export_page_url
-                    
-                    if method == 'get':
-                        export_response = await client.get(post_url, params=data, follow_redirects=True)
-                    else:
-                        export_response = await client.post(post_url, data=data, follow_redirects=True)
-                    
-                    # Restore referer? Not strictly necessary as next request will likely be different or we are done.
-                    
-                    if export_response.status_code == 200:
-                        content_type = export_response.headers.get('content-type', '')
-                        # Content type might be text/x-csv or similar
-                        # Content type might be text/x-csv or similar. 
-                        # HTML is technically text/html so we must explicitly exclude it or check for csv
-                        is_csv = 'csv' in content_type or ('text' in content_type and 'html' not in content_type)
-                        
-                        if is_csv:
-                            csv_content = export_response.text
-                            print(f"CSV Content Preview: {csv_content[:200]}")
-                            
-                            # Process with TankService
-                            service = TankService(db)
-                            result = service.process_readings_csv(csv_content, location.id)
-                            print(f"Import result: {result}")
-                            
-                            records.append({
-                                "type": "history_export",
-                                "new_readings": result.get('new_readings'),
-                                "total_processed": result.get('total_processed')
-                            })
-                        else:
-                            print(f"Export returned non-CSV content: {content_type}")
-                            with open("debug_export.html", "w") as f:
-                                f.write(export_response.text)
-                            print("Saved response to debug_export.html")
+                        print(f"Export returned non-CSV content: {content_type}")
         
         return records

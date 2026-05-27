@@ -378,6 +378,10 @@ class ApiClient {
     return this.request(`/tank/fill-events?location_id=${locationId}`);
   }
 
+  async syncSmartOilGauge() {
+    return this.request('/tank/sync', { method: 'POST' });
+  }
+
   // Temperature / Weather
   async getTemperatures(locationId, days = 30) {
     const dateFrom = new Date();

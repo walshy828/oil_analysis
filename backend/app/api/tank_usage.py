@@ -6,6 +6,7 @@ from typing import Optional, List
 from decimal import Decimal
 import csv
 import io
+import os
 
 from app.database import get_db
 from app.models import TankReading, Location, OilPrice, Company, DailyUsage
@@ -212,11 +213,47 @@ async def recalculate_daily_usage(
     """
     normalizer = UsageNormalizer(db)
     normalizer.recalculate_usage(location_id, days=days)
-    
+
     count = db.query(DailyUsage).filter(DailyUsage.location_id == location_id).count()
-    
+
     return {
         "message": "Recalculation complete",
         "days_processed": days if days else "all",
         "total_records": count
+    }
+
+
+@router.post("/sync")
+async def sync_smart_oil_gauge(db: Session = Depends(get_db)):
+    """
+    Pull the latest data from Smart Oil Gauge right now.
+    Fetches the current tank level and imports the last 30 days of history.
+    Returns the current level so n8n (or any caller) can act on it immediately.
+    Requires SMART_OIL_USERNAME and SMART_OIL_PASSWORD env vars.
+    """
+    from app.scrapers.smart_oil_gauge import SmartOilGaugeScraper
+
+    username = os.getenv("SMART_OIL_USERNAME")
+    password = os.getenv("SMART_OIL_PASSWORD")
+    if not username or not password:
+        raise HTTPException(
+            status_code=503,
+            detail="SMART_OIL_USERNAME / SMART_OIL_PASSWORD not configured on server"
+        )
+
+    scraper = SmartOilGaugeScraper(url="https://app.smartoilgauge.com")
+    try:
+        records = await scraper.scrape(db, snapshot_id="api-sync", scraped_at=datetime.utcnow())
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Smart Oil Gauge scrape failed: {e}")
+
+    current = next((r for r in records if r.get("type") == "current_level"), None)
+    history = next((r for r in records if r.get("type") == "history_export"), None)
+
+    return {
+        "status": "ok",
+        "synced_at": datetime.utcnow().isoformat(),
+        "current_gallons": current.get("gallons") if current else None,
+        "history_new_readings": history.get("new_readings") if history else 0,
+        "history_total_processed": history.get("total_processed") if history else 0,
     }
