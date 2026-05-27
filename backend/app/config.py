@@ -30,6 +30,11 @@ class Settings(BaseSettings):
 
     # External APIs
     eia_api_key: Optional[str] = None
+    anthropic_api_key: Optional[str] = None
+
+    # Smart Oil Gauge
+    smart_oil_username: Optional[str] = None
+    smart_oil_password: Optional[str] = None
 
     class Config:
         env_file = ".env"

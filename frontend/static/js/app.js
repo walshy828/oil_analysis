@@ -36,7 +36,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   await loadReferenceData();
 
   // Load initial page after data is ready
-  const initialPage = window.location.hash.slice(1) || 'dashboard';
+  const initialPage = window.location.hash.slice(1) || 'command';
   navigateTo(initialPage, false);
 });
 
@@ -61,9 +61,13 @@ function navigateTo(page, updateHash = true) {
     window.location.hash = page;
   }
 
+  // Map legacy routes to their new nav equivalent
+  const navPageMap = { dashboard: 'command', analytics: 'market', yoy: 'history', usage: 'home' };
+  const activeNavPage = navPageMap[page] || page;
+
   // Update active nav item
   document.querySelectorAll('.nav-item').forEach(item => {
-    item.classList.toggle('active', item.dataset.page === page);
+    item.classList.toggle('active', item.dataset.page === activeNavPage);
   });
 
   // Close mobile sidebar
@@ -122,14 +126,30 @@ async function renderPage(page) {
 
   try {
     switch (page) {
+      case 'command':
+        await renderCommandCenter(container);
+        break;
+      case 'market':
+        await renderMarketIntel(container);
+        break;
+      case 'home':
+        await renderMyHome(container);
+        break;
+      case 'history':
+        await renderYoYPage(container);
+        break;
+      // Legacy routes — keep working if bookmarked
       case 'dashboard':
-        await renderDashboard(container);
+        await renderCommandCenter(container);
         break;
       case 'analytics':
-        await renderAnalyticsPage(container);
+        await renderMarketIntel(container);
         break;
       case 'yoy':
         await renderYoYPage(container);
+        break;
+      case 'usage':
+        await renderMyHome(container);
         break;
       case 'prices':
         await renderPricesPage(container);
@@ -142,9 +162,6 @@ async function renderPage(page) {
         break;
       case 'companies':
         await renderCompaniesPage(container);
-        break;
-      case 'usage':
-        renderUsagePage(container);
         break;
       case 'settings':
         await renderSettingsPage(container);
@@ -4585,8 +4602,8 @@ async function renderAnalyticsPage(container) {
     <div class="page-header-unified glass-effect">
       <div class="page-header-main">
         <div class="header-title-zone">
-          <h1 class="page-title">Analytics</h1>
-          <p class="header-subtitle">Market Insights & Predictions</p>
+          <h1 class="page-title">Market Intel</h1>
+          <p class="header-subtitle">Upstream Signals, Lead-Lag &amp; Predictions</p>
         </div>
         
         <div class="header-actions-zone">
@@ -5574,6 +5591,580 @@ function generateUnifiedHeader(config) {
     </div>
   `;
 }
+
+// ==================== Command Center ====================
+
+async function renderCommandCenter(container) {
+  const todayStr = getLocalDateString();
+  const d90 = new Date(); d90.setDate(d90.getDate() - 90);
+  const startStr = getLocalDateString(d90);
+
+  const [summary, tankStatus, priceTrends, latestPrices, leadLag, crackSpread, orderInsights] = await Promise.all([
+    api.getDashboardSummary(),
+    api.getDashboardTankStatus(),
+    api.getPriceTrends(90),
+    api.getLatestPrices({ type: 'local' }),
+    api.getLeadLagAnalysis(startStr, todayStr),
+    api.getCrackSpread(startStr, todayStr),
+    api.getOrderInsights(),
+  ]);
+
+  // Derived values
+  const prices = (latestPrices || []).map(p => p.price_per_gallon);
+  const minPrice = prices.length ? Math.min(...prices) : null;
+  const maxPrice = prices.length ? Math.max(...prices) : null;
+  const avgPrice = prices.length ? prices.reduce((a, b) => a + b, 0) / prices.length : null;
+  const cheapestVendor = latestPrices && minPrice != null ? latestPrices.find(p => p.price_per_gallon === minPrice) : null;
+
+  const predictionText = leadLag?.analysis?.prediction || 'Stable';
+  const isPredUp = predictionText.includes('Rise') || predictionText.includes('Upward');
+  const isPredDown = predictionText.includes('Fall') || predictionText.includes('Downward');
+  const trendLabel = isPredUp ? 'Rising' : isPredDown ? 'Falling' : 'Stable';
+  const trendIcon = isPredUp ? '↗' : isPredDown ? '↘' : '→';
+
+  const tank = tankStatus || {};
+  const urgency = tank.urgency || 'ok';
+  const urgencyColors = { critical: 'var(--accent-error)', low: 'var(--accent-warning)', watch: '#f59e0b', ok: 'var(--accent-success)' };
+  const tankColor = urgencyColors[urgency] || 'var(--accent-success)';
+
+  // Tank gauge SVG
+  const pct = Math.min(100, Math.max(0, tank.percent_full || 0));
+  const gaugeCircumference = 2 * Math.PI * 54;
+  const gaugeDash = (pct / 100) * gaugeCircumference;
+
+  const tankGaugeSvg = `
+    <div class="tank-gauge-container">
+      <svg viewBox="0 0 120 120" class="tank-gauge-svg">
+        <circle cx="60" cy="60" r="54" fill="none" stroke="var(--bg-hover)" stroke-width="10"/>
+        <circle cx="60" cy="60" r="54" fill="none" stroke="${tankColor}" stroke-width="10"
+          stroke-dasharray="${gaugeDash} ${gaugeCircumference}"
+          stroke-linecap="round"
+          transform="rotate(-90 60 60)"/>
+        <text x="60" y="54" text-anchor="middle" fill="var(--text-primary)" font-size="22" font-weight="700" font-family="var(--font-mono)">${pct.toFixed(0)}%</text>
+        <text x="60" y="72" text-anchor="middle" fill="var(--text-secondary)" font-size="10">${tank.current_gallons != null ? tank.current_gallons + ' gal' : 'No data'}</text>
+      </svg>
+    </div>`;
+
+  // Build vendor spread dots
+  let vendorSpreadHtml = '';
+  if (latestPrices && latestPrices.length > 0 && minPrice != null && maxPrice != null) {
+    const spread = maxPrice - minPrice;
+    const groups = {};
+    latestPrices.forEach(p => {
+      const k = p.price_per_gallon.toFixed(3);
+      if (!groups[k]) groups[k] = [];
+      groups[k].push(p);
+    });
+    const dots = Object.values(groups).sort((a, b) => a[0].price_per_gallon - b[0].price_per_gallon).map(group => {
+      const p = group[0];
+      const pctPos = spread > 0 ? ((p.price_per_gallon - minPrice) / spread) * 100 : 0;
+      const isCheap = p.price_per_gallon === minPrice;
+      const size = isCheap ? 14 : 8;
+      const color = isCheap ? 'var(--accent-success)' : 'rgba(255,255,255,0.35)';
+      const names = group.map(g => g.company_name);
+      const label = group.length === 1 ? names[0] : `${group.length} vendors`;
+      let tooltipClass = pctPos < 20 ? 'tooltip-left' : pctPos > 80 ? 'tooltip-right' : 'tooltip-center';
+      return `<div class="vendor-dot ${tooltipClass}" style="left:${pctPos}%;background:${color};width:${size}px;height:${size}px;" data-tooltip="${label}\n$${p.price_per_gallon.toFixed(3)}"></div>`;
+    }).join('');
+    vendorSpreadHtml = `
+      <div class="market-spread-viz mt-sm mb-xs">
+        <div class="spread-track"></div>${dots}
+        <div class="spread-labels">
+          <span class="text-xs font-mono text-secondary">$${minPrice.toFixed(3)}</span>
+          <span class="text-xs font-mono text-secondary" style="position:absolute;left:50%;transform:translateX(-50%)">avg $${avgPrice.toFixed(3)}</span>
+          <span class="text-xs font-mono text-secondary">$${maxPrice.toFixed(3)}</span>
+        </div>
+      </div>`;
+  }
+
+  const latestCrack = Array.isArray(crackSpread) && crackSpread.length ? crackSpread[crackSpread.length - 1] : null;
+  const crackVal = latestCrack ? latestCrack.spread : null;
+
+  const headerHtml = generateUnifiedHeader({
+    title: 'Command Center',
+    subtitle: `Buy Intelligence — ${todayStr}`,
+    primaryActions: [
+      { label: 'Refresh Prices', icon: headerIcons.refresh, onclick: 'runQuickScrape()', class: 'btn-primary' },
+    ],
+  });
+
+  container.innerHTML = `
+    ${headerHtml}
+    <div class="page-body">
+
+      <!-- Top row: Tank + AI Recommendation + Buy Signal -->
+      <div class="cc-top-grid mb-lg">
+
+        <!-- Tank Status Card -->
+        <div class="card glass-effect animate-fade-in cc-tank-card" style="border-left: 4px solid ${tankColor};">
+          <div class="card-header border-0 pb-xs">
+            <h3 class="card-title">Tank Status</h3>
+            <span class="badge" style="background:${urgency === 'critical' ? 'rgba(239,68,68,0.15)' : urgency === 'low' ? 'rgba(251,191,36,0.15)' : 'rgba(74,222,128,0.1)'}; color:${tankColor}; border:1px solid ${tankColor}40; font-size:0.7rem; font-weight:700; text-transform:uppercase; letter-spacing:0.05em; padding:2px 8px; border-radius:var(--radius-full);">
+              ${urgency === 'critical' ? 'CRITICAL' : urgency === 'low' ? 'LOW' : urgency === 'watch' ? 'WATCH' : 'OK'}
+            </span>
+          </div>
+          <div class="card-body">
+            <div class="flex align-center gap-lg">
+              ${tankGaugeSvg}
+              <div class="flex flex-column gap-sm flex-1">
+                <div>
+                  <div class="text-xs text-secondary uppercase tracking-widest">Days Remaining</div>
+                  <div class="text-3xl font-bold font-mono" style="color:${tankColor}">${tank.days_remaining != null ? Math.round(tank.days_remaining) : '—'}</div>
+                  ${tank.estimated_depletion ? `<div class="text-xs text-secondary">Empty ~${formatDate(tank.estimated_depletion)}</div>` : ''}
+                </div>
+                <div class="grid grid-2 gap-sm mt-xs">
+                  <div>
+                    <div class="text-xs text-secondary">Burn Rate</div>
+                    <div class="text-sm font-mono font-bold">${tank.avg_daily_usage != null ? tank.avg_daily_usage.toFixed(1) : '—'} gal/day</div>
+                  </div>
+                  <div>
+                    <div class="text-xs text-secondary">Capacity</div>
+                    <div class="text-sm font-mono font-bold">${tank.capacity_gallons || '—'} gal</div>
+                  </div>
+                </div>
+                ${tank.last_reading_at ? `<div class="text-xs text-secondary">Last reading: ${formatDateTime(tank.last_reading_at)}</div>` : ''}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Price Signal Card -->
+        <div class="card glass-effect animate-fade-in" style="animation-delay:0.1s; border-left: 4px solid ${isPredUp ? 'var(--accent-error)' : isPredDown ? 'var(--accent-success)' : 'var(--border-primary)'};">
+          <div class="card-header border-0 pb-xs">
+            <h3 class="card-title">Price Signal</h3>
+            <span class="badge ${isPredUp ? 'text-error' : isPredDown ? 'text-success' : 'text-secondary'}" style="font-size:0.75rem; font-weight:700;">
+              ${trendIcon} ${trendLabel}
+            </span>
+          </div>
+          <div class="card-body">
+            <div class="grid grid-3 gap-md mb-md">
+              <div>
+                <div class="text-xs text-secondary uppercase tracking-widest">Best Price</div>
+                <div class="text-2xl font-bold font-mono text-success">${minPrice != null ? '$' + minPrice.toFixed(3) : '—'}</div>
+                <div class="text-xs text-secondary truncate">${cheapestVendor?.company_name || ''}</div>
+              </div>
+              <div>
+                <div class="text-xs text-secondary uppercase tracking-widest">Market Avg</div>
+                <div class="text-2xl font-bold font-mono">${avgPrice != null ? '$' + avgPrice.toFixed(3) : '—'}</div>
+                <div class="text-xs text-secondary">${latestPrices?.length || 0} vendors</div>
+              </div>
+              <div>
+                <div class="text-xs text-secondary uppercase tracking-widest">Crack Spread</div>
+                <div class="text-2xl font-bold font-mono">${crackVal != null ? '$' + crackVal.toFixed(2) : '—'}</div>
+                <div class="text-xs text-secondary">Refinery margin</div>
+              </div>
+            </div>
+            ${vendorSpreadHtml}
+          </div>
+        </div>
+
+        <!-- Expert Action Card -->
+        <div class="card glass-effect animate-fade-in cc-action-card" style="animation-delay:0.2s;">
+          <div class="card-header border-0 pb-xs">
+            <h3 class="card-title">Expert Action</h3>
+          </div>
+          <div class="card-body flex flex-column gap-md">
+            <div class="cc-action-signal ${isPredUp ? 'signal-danger' : isPredDown ? 'signal-success' : 'signal-neutral'}">
+              <div class="cc-action-label">${isPredUp ? 'ORDER NOW' : isPredDown ? 'WAIT' : urgency === 'critical' ? 'ORDER NOW' : urgency === 'low' ? 'ORDER SOON' : 'MONITOR'}</div>
+              <div class="text-xs mt-xs">
+                ${isPredUp ? 'Leading signals suggest upcoming price increases.' : isPredDown ? 'Downward pressure detected — wait for further drops.' : urgency === 'critical' ? 'Tank critically low regardless of price.' : urgency === 'low' ? 'Tank running low; plan your order soon.' : 'No urgent signals — continue monitoring.'}
+              </div>
+            </div>
+            ${summary?.avg_price_30d ? `
+            <div class="flex flex-between text-xs">
+              <span class="text-secondary">30-day avg</span>
+              <span class="font-mono">${formatCurrency(summary.avg_price_30d)}/gal</span>
+            </div>` : ''}
+            ${summary?.days_since_delivery != null ? `
+            <div class="flex flex-between text-xs">
+              <span class="text-secondary">Last delivery</span>
+              <span class="font-mono">${summary.days_since_delivery} days ago</span>
+            </div>` : ''}
+            ${summary?.year_to_date?.total_cost ? `
+            <div class="flex flex-between text-xs">
+              <span class="text-secondary">YTD spend</span>
+              <span class="font-mono">${formatCurrency(summary.year_to_date.total_cost)}</span>
+            </div>` : ''}
+            <button class="btn btn-secondary btn-sm mt-xs" onclick="navigateTo('orders')">Log an Order</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- AI Analysis Panel -->
+      <div class="card glass-effect mb-lg animate-fade-in" id="ai-panel" style="animation-delay:0.3s;">
+        <div class="card-header">
+          <div class="flex align-center gap-sm">
+            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent-primary)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2z"></path><path d="M12 8v4l3 3"></path></svg>
+            <h3 class="card-title">AI Purchase Analysis</h3>
+          </div>
+          <button class="btn btn-ghost btn-sm" onclick="loadAiAnalysis()">
+            ${headerIcons.refresh} <span>Analyze</span>
+          </button>
+        </div>
+        <div class="card-body" id="ai-panel-body">
+          <div class="ai-placeholder">
+            <p class="text-secondary text-sm">Click <strong>Analyze</strong> for an AI-powered recommendation that factors in your tank level, burn rate, local prices, and upstream commodity signals.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Charts row -->
+      <div class="chart-grid mb-lg">
+        <div class="card glass-effect">
+          <div class="card-header">
+            <h3 class="card-title">90-Day Local Price Trend</h3>
+          </div>
+          <div class="card-body">
+            <div class="chart-container"><canvas id="cc-price-chart"></canvas></div>
+          </div>
+        </div>
+        <div class="card glass-effect">
+          <div class="card-header">
+            <h3 class="card-title">Annual Order History</h3>
+          </div>
+          <div class="card-body">
+            <div class="chart-container"><canvas id="cc-order-chart"></canvas></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Temperature Correlation -->
+      <div class="card glass-effect animate-fade-in">
+        <div class="card-header">
+          <h3 class="card-title">Temperature &amp; Usage Correlation</h3>
+          <span class="text-xs text-secondary">HDD-driven demand vs. daily consumption</span>
+        </div>
+        <div class="card-body">
+          <div class="chart-container" id="cc-temp-container"><canvas id="cc-temp-chart"></canvas></div>
+        </div>
+      </div>
+
+    </div>`;
+
+  // Charts
+  setTimeout(async () => {
+    if (priceTrends?.labels?.length) {
+      const el = document.getElementById('cc-price-chart');
+      if (el) storeChart('cc-price', createPriceTrendChart(el, priceTrends));
+    }
+    if (orderInsights?.length) {
+      const el = document.getElementById('cc-order-chart');
+      if (el) storeChart('cc-order', createYearlyOrderInsightChart(el, orderInsights));
+    }
+    try {
+      const tempData = await api.getTemperatureCorrelation();
+      if (tempData?.temperatures?.labels?.length) {
+        const el = document.getElementById('cc-temp-chart');
+        if (el) storeChart('cc-temp', createTemperatureChart(el, tempData));
+      } else {
+        const c = document.getElementById('cc-temp-container');
+        if (c) c.innerHTML = '<div class="empty-state" style="padding:2rem 0"><h3 class="empty-state-title">No Weather Data</h3><p class="empty-state-text">Configure a location and scrape weather data to unlock this chart.</p></div>';
+      }
+    } catch (e) { /* no-op */ }
+  }, 500);
+}
+
+window.loadAiAnalysis = async function() {
+  const body = document.getElementById('ai-panel-body');
+  if (!body) return;
+  body.innerHTML = '<div class="loading-container" style="min-height:80px"><div class="loading-spinner"></div></div>';
+  try {
+    const result = await api.getAiAnalysis();
+    if (!result.available) {
+      body.innerHTML = `<p class="text-secondary text-sm">${result.message}</p>`;
+      return;
+    }
+
+    const recColors = {
+      BUY_NOW: { bg: 'rgba(239,68,68,0.12)', border: 'var(--accent-error)', text: 'var(--accent-error)', label: 'ORDER NOW' },
+      BUY_SOON: { bg: 'rgba(251,191,36,0.12)', border: 'var(--accent-warning)', text: 'var(--accent-warning)', label: 'ORDER SOON' },
+      MONITOR: { bg: 'rgba(94,106,210,0.12)', border: 'var(--accent-primary)', text: 'var(--accent-primary)', label: 'MONITOR' },
+      WAIT: { bg: 'rgba(74,222,128,0.12)', border: 'var(--accent-success)', text: 'var(--accent-success)', label: 'WAIT' },
+    };
+    const rc = recColors[result.recommendation] || recColors.MONITOR;
+
+    const factorsHtml = (result.key_factors || []).map(f =>
+      `<li class="ai-factor-item"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 11 12 14 22 4"></polyline><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>${f}</li>`
+    ).join('');
+
+    body.innerHTML = `
+      <div class="ai-result-grid">
+        <div class="ai-rec-block" style="background:${rc.bg}; border:1px solid ${rc.border}40; border-radius:var(--radius-lg); padding:var(--space-lg);">
+          <div class="text-xs text-secondary uppercase tracking-widest mb-xs">Recommendation</div>
+          <div class="text-2xl font-bold" style="color:${rc.text}">${rc.label}</div>
+          ${result.days_to_act != null ? `<div class="text-sm text-secondary mt-xs">Act within <strong>${result.days_to_act === 0 ? 'today' : result.days_to_act + ' days'}</strong></div>` : ''}
+          ${result.suggested_gallons ? `<div class="text-sm text-secondary">Suggested order: <strong>${result.suggested_gallons} gal</strong></div>` : ''}
+          <div class="mt-sm">
+            <span class="text-xs uppercase tracking-wider" style="color:${result.confidence === 'high' ? 'var(--accent-success)' : result.confidence === 'medium' ? 'var(--accent-warning)' : 'var(--text-secondary)'}">
+              ${result.confidence?.toUpperCase() || 'LOW'} CONFIDENCE
+            </span>
+          </div>
+        </div>
+
+        <div class="flex flex-column gap-md">
+          <div>
+            <div class="text-xs text-secondary uppercase tracking-widest mb-xs">Analysis</div>
+            <p class="text-sm" style="line-height:1.7;">${result.narrative || ''}</p>
+          </div>
+          ${factorsHtml ? `<div><div class="text-xs text-secondary uppercase tracking-widest mb-xs">Key Factors</div><ul class="ai-factors-list">${factorsHtml}</ul></div>` : ''}
+          ${result.risk_note ? `<div class="ai-risk-note"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg><span>${result.risk_note}</span></div>` : ''}
+        </div>
+      </div>
+      <div class="text-xs text-secondary mt-md" style="text-align:right;">Analysis as of ${result.context_snapshot?.analysis_date || 'today'} · Powered by Claude AI</div>
+    `;
+  } catch (err) {
+    body.innerHTML = `<p class="text-error text-sm">Failed to load AI analysis: ${err.message}</p>`;
+  }
+};
+
+// ==================== Market Intel ====================
+
+async function renderMarketIntel(container) {
+  // Reuse the existing analytics page logic — it's well built
+  return renderAnalyticsPage(container);
+}
+
+// ==================== My Home (Tank + Usage) ====================
+
+async function renderMyHome(container) {
+  if (!locations || locations.length === 0) {
+    container.innerHTML = `
+      <div class="page-body">
+        <div class="empty-state">
+          <h3 class="empty-state-title">No Location Configured</h3>
+          <p class="empty-state-text">Add a location first to track your tank and usage.</p>
+          <button class="btn btn-primary" onclick="navigateTo('locations')">Add Location</button>
+        </div>
+      </div>`;
+    return;
+  }
+
+  const location = locations[0];
+  const lid = location.id;
+
+  const [tankStatus, usageSummary, tankReadings, fillEvents, hddSummary] = await Promise.all([
+    api.getDashboardTankStatus(lid),
+    api.getTankUsageSummary(lid, 30),
+    api.getTankReadings(lid, 30),
+    api.getTankFillEvents(lid),
+    api.getHddSummary(lid, 30).catch(() => null),
+  ]);
+
+  const tank = tankStatus || {};
+  const urgency = tank.urgency || 'ok';
+  const urgencyColors = { critical: 'var(--accent-error)', low: 'var(--accent-warning)', watch: '#f59e0b', ok: 'var(--accent-success)' };
+  const tankColor = urgencyColors[urgency] || 'var(--accent-success)';
+  const pct = Math.min(100, Math.max(0, tank.percent_full || 0));
+  const gaugeCircumference = 2 * Math.PI * 54;
+  const gaugeDash = (pct / 100) * gaugeCircumference;
+
+  const headerHtml = generateUnifiedHeader({
+    title: 'Tank & Usage',
+    subtitle: location.name,
+    primaryActions: [
+      { label: 'Log Order', icon: headerIcons.add, onclick: "navigateTo('orders')", class: 'btn-primary' },
+    ],
+    secondaryActions: [
+      { label: 'Upload Readings', icon: headerIcons.import, onclick: 'showTankUploadModal()' },
+      { label: 'Recalculate Usage', icon: headerIcons.refresh, onclick: `recalculateDailyUsage(${lid})` },
+    ],
+  });
+
+  container.innerHTML = `
+    ${headerHtml}
+    <div class="page-body">
+
+      <!-- Tank Status Row -->
+      <div class="cc-top-grid mb-lg">
+        <div class="card glass-effect animate-fade-in" style="border-left:4px solid ${tankColor};">
+          <div class="card-header pb-xs"><h3 class="card-title">Current Level</h3></div>
+          <div class="card-body">
+            <div class="flex align-center gap-lg">
+              <div class="tank-gauge-container">
+                <svg viewBox="0 0 120 120" class="tank-gauge-svg">
+                  <circle cx="60" cy="60" r="54" fill="none" stroke="var(--bg-hover)" stroke-width="10"/>
+                  <circle cx="60" cy="60" r="54" fill="none" stroke="${tankColor}" stroke-width="10"
+                    stroke-dasharray="${gaugeDash} ${gaugeCircumference}" stroke-linecap="round" transform="rotate(-90 60 60)"/>
+                  <text x="60" y="54" text-anchor="middle" fill="var(--text-primary)" font-size="22" font-weight="700" font-family="var(--font-mono)">${pct.toFixed(0)}%</text>
+                  <text x="60" y="72" text-anchor="middle" fill="var(--text-secondary)" font-size="10">${tank.current_gallons != null ? tank.current_gallons + ' gal' : '—'}</text>
+                </svg>
+              </div>
+              <div class="flex flex-column gap-sm">
+                <div>
+                  <div class="text-xs text-secondary">Days Remaining</div>
+                  <div class="text-2xl font-bold font-mono" style="color:${tankColor}">${tank.days_remaining != null ? Math.round(tank.days_remaining) : '—'}</div>
+                </div>
+                <div>
+                  <div class="text-xs text-secondary">Empty ~</div>
+                  <div class="text-sm font-mono">${tank.estimated_depletion ? formatDate(tank.estimated_depletion) : '—'}</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card glass-effect animate-fade-in" style="animation-delay:0.1s">
+          <div class="card-header pb-xs"><h3 class="card-title">30-Day Usage</h3></div>
+          <div class="card-body">
+            <div class="grid grid-2 gap-md">
+              <div>
+                <div class="text-xs text-secondary">Total Used</div>
+                <div class="text-2xl font-bold font-mono">${usageSummary?.total_usage?.toFixed(1) || '—'}</div>
+                <div class="text-xs text-secondary">gallons</div>
+              </div>
+              <div>
+                <div class="text-xs text-secondary">Daily Average</div>
+                <div class="text-2xl font-bold font-mono">${usageSummary?.avg_daily_usage?.toFixed(1) || '—'}</div>
+                <div class="text-xs text-secondary">gal/day</div>
+              </div>
+              <div>
+                <div class="text-xs text-secondary">Est. Cost</div>
+                <div class="text-lg font-bold font-mono">${usageSummary?.estimated_cost ? formatCurrency(usageSummary.estimated_cost) : '—'}</div>
+                <div class="text-xs text-secondary">at ${usageSummary?.latest_price ? formatCurrency(usageSummary.latest_price) : '?'}/gal</div>
+              </div>
+              <div>
+                <div class="text-xs text-secondary">Recent HDD</div>
+                <div class="text-lg font-bold font-mono">${hddSummary?.total_hdd != null ? hddSummary.total_hdd.toFixed(0) : '—'}</div>
+                <div class="text-xs text-secondary">heating degree days</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card glass-effect animate-fade-in" style="animation-delay:0.2s">
+          <div class="card-header pb-xs"><h3 class="card-title">Recent Fill Events</h3></div>
+          <div class="card-body">
+            ${fillEvents?.length ? `
+            <div class="table-container">
+              <table class="data-table text-sm">
+                <thead><tr><th>Date</th><th>Level After</th></tr></thead>
+                <tbody>
+                  ${fillEvents.slice(0, 5).map(f => `
+                    <tr>
+                      <td>${formatDate(f.date)}</td>
+                      <td class="font-mono">${parseFloat(f.gallons_after_fill).toFixed(1)} gal</td>
+                    </tr>`).join('')}
+                </tbody>
+              </table>
+            </div>` : '<p class="text-secondary text-sm">No fill events recorded yet.</p>'}
+          </div>
+        </div>
+      </div>
+
+      <!-- Tank Level Chart -->
+      <div class="card glass-effect mb-lg animate-fade-in">
+        <div class="card-header">
+          <h3 class="card-title">Tank Level History (30 Days)</h3>
+          <div class="flex gap-sm">
+            <span class="text-xs text-secondary flex align-center gap-xs"><span style="width:10px;height:3px;background:var(--accent-success);display:inline-block;border-radius:2px"></span>Clean</span>
+            <span class="text-xs text-secondary flex align-center gap-xs"><span style="width:10px;height:3px;background:var(--accent-error);display:inline-block;border-radius:2px"></span>Fill</span>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="chart-container"><canvas id="myhome-tank-chart"></canvas></div>
+        </div>
+      </div>
+
+      <!-- Usage vs HDD Chart -->
+      <div class="card glass-effect animate-fade-in">
+        <div class="card-header">
+          <h3 class="card-title">Daily Usage &amp; Temperature</h3>
+        </div>
+        <div class="card-body">
+          <div class="chart-container" id="myhome-temp-container"><canvas id="myhome-temp-chart"></canvas></div>
+        </div>
+      </div>
+
+    </div>`;
+
+  // Render tank level chart
+  setTimeout(async () => {
+    const canvas = document.getElementById('myhome-tank-chart');
+    if (canvas && tankReadings?.length) {
+      const readings = tankReadings;
+      const labels = readings.map(r => r.timestamp);
+      const data = readings.map(r => r.gallons);
+      const fills = readings.map(r => r.is_fill_event);
+      const Chart = window.Chart;
+      if (Chart) {
+        const pointColors = fills.map(f => f ? 'rgba(239,68,68,0.9)' : 'rgba(74,222,128,0.6)');
+        const pointRadius = fills.map(f => f ? 6 : 2);
+        new Chart(canvas, {
+          type: 'line',
+          data: {
+            labels,
+            datasets: [{
+              label: 'Gallons',
+              data,
+              borderColor: 'rgba(94,106,210,0.8)',
+              backgroundColor: 'rgba(94,106,210,0.07)',
+              fill: true,
+              tension: 0.3,
+              pointBackgroundColor: pointColors,
+              pointRadius,
+              pointHoverRadius: 6,
+            }]
+          },
+          options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: {
+              x: { type: 'time', time: { unit: 'day' }, ticks: { color: 'rgba(255,255,255,0.4)', maxTicksLimit: 10 }, grid: { color: 'rgba(255,255,255,0.05)' } },
+              y: { ticks: { color: 'rgba(255,255,255,0.4)' }, grid: { color: 'rgba(255,255,255,0.05)' }, title: { display: true, text: 'Gallons', color: 'rgba(255,255,255,0.4)' } }
+            }
+          }
+        });
+      }
+    } else if (canvas) {
+      canvas.parentElement.innerHTML = '<div class="empty-state" style="padding:2rem 0"><h3 class="empty-state-title">No Tank Readings</h3><p class="empty-state-text">Smart Oil Gauge data will populate this chart once scraped.</p></div>';
+    }
+
+    try {
+      const tempData = await api.getTemperatureCorrelation(null, null, 'daily', lid);
+      if (tempData?.temperatures?.labels?.length) {
+        const el = document.getElementById('myhome-temp-chart');
+        if (el) storeChart('myhome-temp', createTemperatureChart(el, tempData));
+      } else {
+        const c = document.getElementById('myhome-temp-container');
+        if (c) c.innerHTML = '<div class="empty-state" style="padding:2rem 0"><h3 class="empty-state-title">No Temperature Data</h3><p class="empty-state-text">Configure weather scraping for this location to enable correlation analysis.</p></div>';
+      }
+    } catch (e) { /* no-op */ }
+  }, 400);
+}
+
+window.showTankUploadModal = function() {
+  const loc = locations && locations[0];
+  if (!loc) { showToast('No location configured', 'warning'); return; }
+  document.getElementById('modal-title').textContent = 'Upload Tank Readings';
+  document.getElementById('modal-body').innerHTML = `
+    <p class="text-secondary text-sm mb-md">Upload a Smart Oil Gauge CSV export (t,g format) for <strong>${loc.name}</strong>.</p>
+    <input type="file" class="form-input" id="myhome-tank-file" accept=".csv">
+  `;
+  document.getElementById('modal-confirm').textContent = 'Upload';
+  document.getElementById('modal-confirm').onclick = async () => {
+    const file = document.getElementById('myhome-tank-file')?.files[0];
+    if (!file) { showToast('Select a file first', 'warning'); return; }
+    try {
+      showToast('Uploading...', 'info');
+      const result = await api.uploadTankReadings(file, loc.id);
+      showToast(`Uploaded ${result.new_readings} readings`, 'success');
+      closeModal();
+      renderPage('home');
+    } catch (e) { showToast('Upload failed: ' + e.message, 'error'); }
+  };
+  openModal();
+};
+
+window.recalculateDailyUsage = async function(locationId) {
+  try {
+    showToast('Recalculating usage...', 'info');
+    await api.request(`/tank/recalculate-daily-usage?location_id=${locationId}`, { method: 'POST' });
+    showToast('Usage recalculated successfully', 'success');
+    renderPage('home');
+  } catch (e) {
+    showToast('Recalculation failed: ' + e.message, 'error');
+  }
+};
 
 // Icon SVG helpers for header actions
 const headerIcons = {

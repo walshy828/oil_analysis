@@ -477,6 +477,17 @@ class ApiClient {
     if (apiKey) url += `&api_key=${apiKey}`;
     return this.request(url, { method: 'POST' });
   }
+
+  // AI Analysis
+  async getAiAnalysis() {
+    return this.request('/ai/analysis');
+  }
+
+  // Dashboard tank status
+  async getDashboardTankStatus(locationId = null) {
+    const params = locationId ? `?location_id=${locationId}` : '';
+    return this.request(`/dashboard/tank-status${params}`);
+  }
 }
 
 // Global API instance

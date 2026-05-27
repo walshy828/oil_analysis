@@ -102,6 +102,92 @@ async def get_dashboard_summary(db: Session = Depends(get_db)):
     }
 
 
+@router.get("/tank-status")
+async def get_tank_status(
+    location_id: Optional[int] = None,
+    db: Session = Depends(get_db)
+):
+    """Combined tank level, burn rate, and days-remaining calculation."""
+    if location_id:
+        location = db.query(Location).filter(Location.id == location_id).first()
+    else:
+        location = db.query(Location).first()
+
+    if not location:
+        return {"available": False, "message": "No location configured"}
+
+    reading = db.query(TankReading).filter(
+        TankReading.location_id == location.id,
+        TankReading.is_anomaly == False
+    ).order_by(TankReading.timestamp.desc()).first()
+
+    # 30-day burn rate from DailyUsage
+    thirty_days_ago = date.today() - timedelta(days=30)
+    usage_rows = db.query(DailyUsage).filter(
+        DailyUsage.location_id == location.id,
+        DailyUsage.date >= thirty_days_ago
+    ).all()
+
+    # Also try direct tank reading diff if DailyUsage is empty
+    if not usage_rows:
+        from datetime import datetime as dt
+        raw_readings = db.query(TankReading).filter(
+            TankReading.location_id == location.id,
+            TankReading.timestamp >= dt.utcnow() - timedelta(days=30),
+            TankReading.is_anomaly == False,
+            TankReading.is_fill_event == False,
+            TankReading.is_post_fill_unstable == False,
+        ).order_by(TankReading.timestamp).all()
+
+        day_buckets = {}
+        for r in raw_readings:
+            day = r.timestamp.date()
+            if day not in day_buckets:
+                day_buckets[day] = {"first": float(r.gallons), "last": float(r.gallons)}
+            else:
+                day_buckets[day]["last"] = float(r.gallons)
+        total_usage = sum(max(0, v["first"] - v["last"]) for v in day_buckets.values())
+        days_with_data = len(day_buckets)
+    else:
+        total_usage = sum(float(u.gallons) for u in usage_rows)
+        days_with_data = len(usage_rows)
+
+    avg_daily = total_usage / days_with_data if days_with_data > 0 else 0
+
+    current_gallons = float(reading.gallons) if reading else None
+    capacity = float(location.tank_capacity or 275)
+    percent_full = (current_gallons / capacity * 100) if current_gallons else None
+    days_remaining = (current_gallons / avg_daily) if (current_gallons and avg_daily > 0) else None
+
+    depletion_date = None
+    if days_remaining:
+        depletion_date = (date.today() + timedelta(days=int(days_remaining))).isoformat()
+
+    # Classify urgency
+    urgency = "ok"
+    if days_remaining is not None:
+        if days_remaining < 10:
+            urgency = "critical"
+        elif days_remaining < 21:
+            urgency = "low"
+        elif days_remaining < 40:
+            urgency = "watch"
+
+    return {
+        "available": True,
+        "location_id": location.id,
+        "location_name": location.name,
+        "current_gallons": round(current_gallons, 1) if current_gallons else None,
+        "capacity_gallons": capacity,
+        "percent_full": round(percent_full, 1) if percent_full else None,
+        "avg_daily_usage": round(avg_daily, 2),
+        "days_remaining": round(days_remaining, 0) if days_remaining else None,
+        "estimated_depletion": depletion_date,
+        "urgency": urgency,
+        "last_reading_at": reading.timestamp.isoformat() if reading else None,
+    }
+
+
 @router.get("/price-trends")
 async def get_price_trends(
     days: int = 90,
