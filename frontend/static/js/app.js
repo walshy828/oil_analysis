@@ -6042,6 +6042,7 @@ async function renderMyHome(container) {
       { label: 'Log Order', icon: headerIcons.add, onclick: "navigateTo('orders')", class: 'btn-primary' },
     ],
     secondaryActions: [
+      { label: 'Sync Smart Oil Gauge', icon: headerIcons.refresh, onclick: 'syncSmartOilGaugeHome()' },
       { label: 'Upload Readings', icon: headerIcons.import, onclick: 'showTankUploadModal()' },
       { label: 'Recalculate Usage', icon: headerIcons.refresh, onclick: `recalculateDailyUsage(${lid})` },
     ],
@@ -6240,6 +6241,19 @@ window.recalculateDailyUsage = async function(locationId) {
     renderPage('home');
   } catch (e) {
     showToast('Recalculation failed: ' + e.message, 'error');
+  }
+};
+
+window.syncSmartOilGaugeHome = async function() {
+  showToast('Connecting to Smart Oil Gauge…', 'info');
+  try {
+    const result = await api.syncSmartOilGauge();
+    const gallons = result.current_gallons != null ? `${result.current_gallons} gal` : 'unknown';
+    const newReadings = result.history_new_readings || 0;
+    showToast(`Synced — ${gallons} current · ${newReadings} new history readings`, 'success');
+    renderPage('home');
+  } catch (e) {
+    showToast('Sync failed: ' + e.message, 'error');
   }
 };
 
