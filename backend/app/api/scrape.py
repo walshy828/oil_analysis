@@ -2,8 +2,9 @@ from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
 from typing import List
 from datetime import datetime
+import uuid
 
-from app.database import get_db
+from app.database import get_db, SessionLocal
 from app.models import ScrapeConfig, ScrapeHistory
 from app.schemas import ScrapeConfigCreate, ScrapeConfigUpdate, ScrapeConfigResponse, ScrapeHistoryResponse
 from app.scrapers import get_scraper
@@ -13,18 +14,15 @@ router = APIRouter()
 
 @router.get("/configs", response_model=List[ScrapeConfigResponse])
 async def list_scrape_configs(db: Session = Depends(get_db)):
-    """List all scrape configurations."""
     return db.query(ScrapeConfig).all()
 
 
 @router.post("/configs", response_model=ScrapeConfigResponse)
 async def create_scrape_config(config: ScrapeConfigCreate, db: Session = Depends(get_db)):
-    """Create a new scrape configuration."""
-    # Check if name already exists
     existing = db.query(ScrapeConfig).filter(ScrapeConfig.name == config.name).first()
     if existing:
         raise HTTPException(status_code=400, detail="Configuration name already exists")
-    
+
     db_config = ScrapeConfig(**config.model_dump())
     db.add(db_config)
     db.commit()
@@ -34,7 +32,6 @@ async def create_scrape_config(config: ScrapeConfigCreate, db: Session = Depends
 
 @router.get("/configs/{config_id}", response_model=ScrapeConfigResponse)
 async def get_scrape_config(config_id: int, db: Session = Depends(get_db)):
-    """Get a specific scrape configuration."""
     config = db.query(ScrapeConfig).filter(ScrapeConfig.id == config_id).first()
     if not config:
         raise HTTPException(status_code=404, detail="Configuration not found")
@@ -47,15 +44,14 @@ async def update_scrape_config(
     config_update: ScrapeConfigUpdate,
     db: Session = Depends(get_db)
 ):
-    """Update a scrape configuration."""
     config = db.query(ScrapeConfig).filter(ScrapeConfig.id == config_id).first()
     if not config:
         raise HTTPException(status_code=404, detail="Configuration not found")
-    
+
     update_data = config_update.model_dump(exclude_unset=True)
     for field, value in update_data.items():
         setattr(config, field, value)
-    
+
     db.commit()
     db.refresh(config)
     return config
@@ -63,59 +59,56 @@ async def update_scrape_config(
 
 @router.delete("/configs/{config_id}")
 async def delete_scrape_config(config_id: int, db: Session = Depends(get_db)):
-    """Delete a scrape configuration."""
     config = db.query(ScrapeConfig).filter(ScrapeConfig.id == config_id).first()
     if not config:
         raise HTTPException(status_code=404, detail="Configuration not found")
-    
+
     db.delete(config)
     db.commit()
     return {"message": "Configuration deleted"}
 
 
-async def run_scraper_task(config_id: int, db: Session):
-    """Background task to run a scraper."""
-    config = db.query(ScrapeConfig).filter(ScrapeConfig.id == config_id).first()
-    if not config:
-        return
-    
-    # Generate snapshot metadata
-    import uuid
-    snapshot_id = str(uuid.uuid4())
-    scrape_ts = datetime.utcnow()
-    
-    # Create history record with snapshot_id
-    history = ScrapeHistory(
-        config_id=config_id, 
-        status="running",
-        snapshot_id=snapshot_id
-    )
-    db.add(history)
-    db.commit()
-    db.refresh(history)
-    
+async def _run_scraper_background(config_id: int) -> None:
+    """
+    Background task that owns its own DB session.
+    Must not reuse the request-scoped session from Depends(get_db).
+    """
+    db = SessionLocal()
     try:
-        # Get the appropriate scraper
-        scraper = get_scraper(config.scraper_type, config.url)
-        
-        # Run the scraper with snapshot metadata
-        records = await scraper.scrape(db, snapshot_id=snapshot_id, scraped_at=scrape_ts)
-        
-        # Update history with scraped data summary
-        history.status = "success"
-        history.records_scraped = len(records)
-        history.completed_at = datetime.utcnow()
-        history.scraped_data = records  # Store the scraped records summary
-        
-        # Update config last run
-        config.last_run = scrape_ts
-        
-    except Exception as e:
-        history.status = "failed"
-        history.error_message = str(e)
-        history.completed_at = datetime.utcnow()
-    
-    db.commit()
+        config = db.query(ScrapeConfig).filter(ScrapeConfig.id == config_id).first()
+        if not config:
+            return
+
+        snapshot_id = str(uuid.uuid4())
+        scrape_ts = datetime.utcnow()
+
+        history = ScrapeHistory(
+            config_id=config_id,
+            status="running",
+            snapshot_id=snapshot_id
+        )
+        db.add(history)
+        db.commit()
+        db.refresh(history)
+
+        try:
+            scraper = get_scraper(config.scraper_type, config.url)
+            records = await scraper.scrape(db, snapshot_id=snapshot_id, scraped_at=scrape_ts)
+
+            history.status = "success"
+            history.records_scraped = len(records)
+            history.completed_at = datetime.utcnow()
+            history.scraped_data = records
+            config.last_run = scrape_ts
+
+        except Exception as e:
+            history.status = "failed"
+            history.error_message = str(e)
+            history.completed_at = datetime.utcnow()
+
+        db.commit()
+    finally:
+        db.close()
 
 
 @router.post("/run/{config_id}")
@@ -128,10 +121,8 @@ async def run_scrape_now(
     config = db.query(ScrapeConfig).filter(ScrapeConfig.id == config_id).first()
     if not config:
         raise HTTPException(status_code=404, detail="Configuration not found")
-    
-    # Run in background
-    background_tasks.add_task(run_scraper_task, config_id, db)
-    
+
+    background_tasks.add_task(_run_scraper_background, config_id)
     return {"message": "Scrape started", "config_id": config_id}
 
 
@@ -143,23 +134,21 @@ async def get_scrape_history(
     days: int = None,
     db: Session = Depends(get_db)
 ):
-    """Get scrape run history."""
     query = db.query(ScrapeHistory)
-    
+
     if config_id:
         query = query.filter(ScrapeHistory.config_id == config_id)
-        
+
     if days:
         from datetime import timedelta
         date_threshold = datetime.utcnow() - timedelta(days=days)
         query = query.filter(ScrapeHistory.started_at >= date_threshold)
-    
+
     return query.order_by(ScrapeHistory.started_at.desc()).offset(skip).limit(limit).all()
 
 
 @router.get("/types")
 async def get_scraper_types():
-    """Get available scraper types."""
     return {
         "types": [
             {"id": "newengland_oil", "name": "New England Oil", "description": "Scrapes oil prices from newenglandoil.com"},

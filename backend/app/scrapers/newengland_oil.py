@@ -124,9 +124,17 @@ class NewEnglandOilScraper(BaseScraper):
                                 # Keep today if parse fails
                                 pass
 
-                # Save Data
+                # Save Data — skip if this company already has a price for today
                 company = find_or_create_company(db, raw_company_name, website, phone)
-                
+
+                existing = db.query(OilPrice).filter(
+                    OilPrice.company_id == company.id,
+                    OilPrice.date_reported == date_reported,
+                    OilPrice.town == town,
+                ).first()
+                if existing:
+                    continue
+
                 oil_price = OilPrice(
                     company_id=company.id,
                     price_per_gallon=price,

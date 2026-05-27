@@ -8,7 +8,6 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 import pytz
-import redis
 
 from app.config import settings
 from app.database import SessionLocal
@@ -16,13 +15,7 @@ from app.models import ScrapeConfig, ScrapeHistory
 from app.models.scrape_config import ScheduleType
 from app.scrapers import get_scraper
 
-# Timezone for scheduling (adjust if needed)
 SCHEDULE_TZ = pytz.timezone('America/New_York')
-
-
-
-# Redis connection for distributed locking
-redis_client = redis.from_url(settings.redis_url)
 
 
 async def run_scrape_job(config_id: int):

@@ -32,6 +32,12 @@ class OilPriceResponse(OilPriceBase):
         from_attributes = True
 
 
+class OilPriceUpdate(BaseModel):
+    price_per_gallon: Optional[Decimal] = None
+    town: Optional[str] = None
+    date_reported: Optional[date] = None
+
+
 class OilPriceFilter(BaseModel):
     company_id: Optional[int] = None
     company_name: Optional[str] = None

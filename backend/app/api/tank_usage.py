@@ -10,10 +10,11 @@ import io
 from app.database import get_db
 from app.models import TankReading, Location, OilPrice, Company, DailyUsage
 from app.services.usage_normalization import UsageNormalizer
-
 from app.services.tank_service import TankService
 
 router = APIRouter()
+
+_MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB
 
 
 @router.post("/upload")
@@ -27,8 +28,9 @@ async def upload_tank_readings(
     Expected format: t,g (timestamp, gallons)
     Deduplicates based on location_id + timestamp.
     """
-    # Parse CSV
-    content = await file.read()
+    content = await file.read(_MAX_UPLOAD_BYTES + 1)
+    if len(content) > _MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="File too large. Maximum size is 10 MB.")
     text = content.decode('utf-8')
     
     service = TankService(db)

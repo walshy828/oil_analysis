@@ -370,23 +370,13 @@ class UsageNormalizer:
         return drop, False, ' | '.join(notes_parts)
 
 
-    def _find_start_date_by_sensor_drop(self, location_id: int, end_date: date, target_drop: float) -> Optional[date]:
-        # Walk back day by day, accumulating drop until match
-        acc_drop = 0
-        curr = end_date - timedelta(days=1)
-        limit = end_date - timedelta(days=120) 
-        
-        while curr > limit:
-            drop, _, _ = self._get_daily_sensor_drop(location_id, curr)
-            acc_drop += drop
-            if acc_drop >= target_drop * 0.9:
-                return curr
-            curr -= timedelta(days=1)
-        return None
-
     def _process_raw_sensor_only(self, location_id: int, start_date: Optional[date] = None):
-        # Fallback if no orders
-        pass
+        """Fallback when no orders exist for a location — uses open-ended sensor processing."""
+        effective_start = start_date or (date.today() - timedelta(days=365))
+        logger.info(
+            f"Location {location_id} has no orders; running open-ended sensor processing from {effective_start}"
+        )
+        self._process_open_ended_period(location_id, effective_start)
 
     def _smooth_contextual_spikes(self, allocations: list) -> list:
         """

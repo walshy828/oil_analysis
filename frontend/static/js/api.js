@@ -3,6 +3,60 @@
  */
 
 const API_BASE = '/api';
+const API_KEY_STORAGE = 'oil_tracker_api_key';
+
+/** Retrieve the stored API key, prompting the user if absent. */
+function getApiKey() {
+  return localStorage.getItem(API_KEY_STORAGE) || '';
+}
+
+/** Persist a new API key and reload so all pending calls use it. */
+function setApiKey(key) {
+  localStorage.setItem(API_KEY_STORAGE, key.trim());
+}
+
+/** Show a simple inline modal asking for the API key. Returns a Promise<string>. */
+function promptApiKey(message = 'Enter your API key to access the Oil Price Tracker:') {
+  return new Promise((resolve) => {
+    // Reuse or create overlay
+    let overlay = document.getElementById('api-key-overlay');
+    if (!overlay) {
+      overlay = document.createElement('div');
+      overlay.id = 'api-key-overlay';
+      overlay.style.cssText = [
+        'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:9999',
+        'display:flex;align-items:center;justify-content:center',
+      ].join(';');
+      overlay.innerHTML = `
+        <div style="background:#1e293b;border:1px solid #334155;border-radius:12px;padding:32px;min-width:340px;max-width:420px;box-shadow:0 24px 48px rgba(0,0,0,0.5)">
+          <h3 style="margin:0 0 8px;color:#f1f5f9;font-size:18px;font-weight:600">API Key Required</h3>
+          <p id="api-key-msg" style="margin:0 0 20px;color:#94a3b8;font-size:14px"></p>
+          <input id="api-key-input" type="password" placeholder="Paste your API key"
+            style="width:100%;box-sizing:border-box;padding:10px 14px;border-radius:8px;border:1px solid #475569;background:#0f172a;color:#f1f5f9;font-size:14px;outline:none;margin-bottom:16px"/>
+          <div style="display:flex;gap:10px;justify-content:flex-end">
+            <button id="api-key-save" style="padding:9px 20px;border-radius:8px;border:none;background:#3b82f6;color:#fff;font-size:14px;font-weight:500;cursor:pointer">Save &amp; Continue</button>
+          </div>
+        </div>`;
+      document.body.appendChild(overlay);
+    }
+
+    document.getElementById('api-key-msg').textContent = message;
+    const input = document.getElementById('api-key-input');
+    input.value = '';
+    overlay.style.display = 'flex';
+
+    const save = () => {
+      const val = input.value.trim();
+      if (!val) return;
+      overlay.style.display = 'none';
+      resolve(val);
+    };
+
+    document.getElementById('api-key-save').onclick = save;
+    input.onkeydown = (e) => { if (e.key === 'Enter') save(); };
+    setTimeout(() => input.focus(), 50);
+  });
+}
 
 class ApiClient {
   constructor(baseUrl = API_BASE) {
@@ -20,6 +74,10 @@ class ApiClient {
       headers['Content-Type'] = headers['Content-Type'] || 'application/json';
     }
 
+    // Attach API key
+    const apiKey = getApiKey();
+    if (apiKey) headers['X-API-Key'] = apiKey;
+
     const config = {
       ...options,
       headers
@@ -31,6 +89,13 @@ class ApiClient {
 
     try {
       const response = await fetch(url, config);
+
+      // If forbidden, the key is missing or wrong — prompt and retry once
+      if (response.status === 403) {
+        const newKey = await promptApiKey('Invalid or missing API key. Enter your API key:');
+        setApiKey(newKey);
+        return this.request(endpoint, options);
+      }
 
       if (!response.ok) {
         let errorData;

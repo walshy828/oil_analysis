@@ -201,8 +201,8 @@ class SmartOilGaugeScraper(BaseScraper):
                              data[name] = inp.get('value', '')
                     
                     # Update fields
-                    data['startdate'] = start_date.strftime("%m/%d/%Y")
-                    data['enddate'] = end_date.strftime("%m/%d/%Y")
+                    data['startdate'] = start_date.strftime("%Y-%m-%d")
+                    data['enddate'] = end_date.strftime("%Y-%m-%d")
                     # Check if there is a submit button with a name
                     submit_btn = form.find('button', attrs={'type': 'submit'}) or form.find('input', attrs={'type': 'submit'})
                     if submit_btn and submit_btn.get('name'):
@@ -229,7 +229,11 @@ class SmartOilGaugeScraper(BaseScraper):
                     if export_response.status_code == 200:
                         content_type = export_response.headers.get('content-type', '')
                         # Content type might be text/x-csv or similar
-                        if 'csv' in content_type or 'text' in content_type:
+                        # Content type might be text/x-csv or similar. 
+                        # HTML is technically text/html so we must explicitly exclude it or check for csv
+                        is_csv = 'csv' in content_type or ('text' in content_type and 'html' not in content_type)
+                        
+                        if is_csv:
                             csv_content = export_response.text
                             print(f"CSV Content Preview: {csv_content[:200]}")
                             
@@ -245,5 +249,8 @@ class SmartOilGaugeScraper(BaseScraper):
                             })
                         else:
                             print(f"Export returned non-CSV content: {content_type}")
+                            with open("debug_export.html", "w") as f:
+                                f.write(export_response.text)
+                            print("Saved response to debug_export.html")
         
         return records

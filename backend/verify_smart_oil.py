@@ -14,7 +14,7 @@ async def main():
     db = SessionLocal()
     try:
         print("Initializing Scraper...")
-        scraper = SmartOilGaugeScraper()
+        scraper = SmartOilGaugeScraper(url="https://app.smartoilgauge.com")
         
         print("Running scrape()...")
         # We need a snapshot_id for the scrape method signature, though it might optional in some implementations

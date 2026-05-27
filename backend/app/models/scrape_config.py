@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text, Enum, JSON
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text, Enum, JSON, ForeignKey
 from datetime import datetime
 import enum
 from app.database import Base
@@ -38,7 +38,7 @@ class ScrapeHistory(Base):
     __tablename__ = "scrape_history"
 
     id = Column(Integer, primary_key=True, index=True)
-    config_id = Column(Integer, nullable=False, index=True)
+    config_id = Column(Integer, ForeignKey("scrape_configs.id", ondelete="CASCADE"), nullable=False, index=True)
     started_at = Column(DateTime, default=datetime.utcnow)
     completed_at = Column(DateTime, nullable=True)
     status = Column(String(50), default="running")  # running, success, failed

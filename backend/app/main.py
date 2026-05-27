@@ -1,10 +1,11 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Security
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import logging
 
 from app.config import settings
+from app.auth import verify_api_key
 from app.database import engine, Base
 from app.api import dashboard, companies, oil_prices, locations, oil_orders, temperatures, scrape, system, analytics, tank_usage, historical_import
 
@@ -62,18 +63,20 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include routers
-app.include_router(dashboard.router, prefix="/api/dashboard", tags=["Dashboard"])
-app.include_router(analytics.router, prefix="/api/analytics", tags=["Analytics"])
-app.include_router(companies.router, prefix="/api/companies", tags=["Companies"])
-app.include_router(oil_prices.router, prefix="/api/oil-prices", tags=["Oil Prices"])
-app.include_router(locations.router, prefix="/api/locations", tags=["Locations"])
-app.include_router(oil_orders.router, prefix="/api/orders", tags=["Oil Orders"])
-app.include_router(temperatures.router, prefix="/api/temperatures", tags=["Temperatures"])
-app.include_router(scrape.router, prefix="/api/scrape", tags=["Scrape"])
-app.include_router(system.router, prefix="/api/system", tags=["System"])
-app.include_router(tank_usage.router, prefix="/api/tank", tags=["Tank Usage"])
-app.include_router(historical_import.router, prefix="/api/import", tags=["Historical Import"])
+_auth = [Security(verify_api_key)]
+
+# Include routers — all /api/* routes require X-API-Key
+app.include_router(dashboard.router, prefix="/api/dashboard", tags=["Dashboard"], dependencies=_auth)
+app.include_router(analytics.router, prefix="/api/analytics", tags=["Analytics"], dependencies=_auth)
+app.include_router(companies.router, prefix="/api/companies", tags=["Companies"], dependencies=_auth)
+app.include_router(oil_prices.router, prefix="/api/oil-prices", tags=["Oil Prices"], dependencies=_auth)
+app.include_router(locations.router, prefix="/api/locations", tags=["Locations"], dependencies=_auth)
+app.include_router(oil_orders.router, prefix="/api/orders", tags=["Oil Orders"], dependencies=_auth)
+app.include_router(temperatures.router, prefix="/api/temperatures", tags=["Temperatures"], dependencies=_auth)
+app.include_router(scrape.router, prefix="/api/scrape", tags=["Scrape"], dependencies=_auth)
+app.include_router(system.router, prefix="/api/system", tags=["System"], dependencies=_auth)
+app.include_router(tank_usage.router, prefix="/api/tank", tags=["Tank Usage"], dependencies=_auth)
+app.include_router(historical_import.router, prefix="/api/import", tags=["Historical Import"], dependencies=_auth)
 
 
 @app.get("/health")

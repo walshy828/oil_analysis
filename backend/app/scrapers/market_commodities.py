@@ -7,7 +7,8 @@ import re
 from sqlalchemy.orm import Session
 
 from app.scrapers.base import BaseScraper
-from app.models import Company, OilPrice
+from app.models import OilPrice
+from app.services.company_service import find_or_create_market_company
 
 # Map internal IDs to Yahoo Finance Symbols
 MARKET_COMMODITIES = {
@@ -88,8 +89,7 @@ class MarketCommoditiesScraper(BaseScraper):
                     if not price:
                         continue
                         
-                    # Find or create the "Company" for this index
-                    company = self._find_or_create_index_company(db, info["name"])
+                    company = find_or_create_market_company(db, info["name"], "https://finance.yahoo.com")
                     
                     # Save Price
                     oil_price = OilPrice(
@@ -116,16 +116,3 @@ class MarketCommoditiesScraper(BaseScraper):
         
         return records
 
-    def _find_or_create_index_company(self, db: Session, name: str) -> Company:
-        company = db.query(Company).filter(Company.name == name).first()
-        if not company:
-            company = Company(
-                name=name,
-                is_market_index=True,
-                website="https://finance.yahoo.com",
-                phone="N/A"
-            )
-            db.add(company)
-            db.commit()
-            db.refresh(company)
-        return company

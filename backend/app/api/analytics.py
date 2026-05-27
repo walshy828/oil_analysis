@@ -71,10 +71,10 @@ def aggregate_series(series: Dict[str, float], aggregation: str) -> Dict[str, fl
     for d_str, val in series.items():
         try:
             dt = date.fromisoformat(d_str)
-            if agg_type == "weekly":
+            if aggregation == "weekly":
                 # Start of week (Sunday)
                 key = (dt - timedelta(days=dt.weekday() + 1 if dt.weekday() != 6 else 0)).isoformat()
-            elif agg_type == "monthly":
+            elif aggregation == "monthly":
                 key = dt.replace(day=1).isoformat()
             else:
                 key = d_str

@@ -20,11 +20,9 @@ def update_daily_usage_job():
         for loc in locations:
             logger.info(f"Updating usage for location {loc.name} (ID: {loc.id})")
             try:
-                # Recalculate last 45 days. 
-                # This ensures any recent delayed orders or sensor updates are captured.
+                # Recalculate last 45 days to capture delayed orders or sensor updates.
+                # UsageNormalizer commits internally; no outer commit needed.
                 normalizer.recalculate_usage(loc.id, days=45)
-                session.commit() # Commit per location or batch? Normalizer commits internally?
-                # Normalizer does self.db.commit().
             except Exception as e:
                 logger.error(f"Error updating usage for location {loc.id}: {e}")
                 session.rollback()

@@ -4,6 +4,22 @@ from sqlalchemy.orm import Session
 from app.models import Company, CompanyAlias
 
 
+def find_or_create_market_company(db: Session, name: str, website: str) -> Company:
+    """Get or create a market-index company (EIA, Yahoo Finance, etc.)."""
+    company = db.query(Company).filter(Company.name == name).first()
+    if not company:
+        company = Company(
+            name=name,
+            is_market_index=True,
+            website=website,
+            phone="N/A",
+        )
+        db.add(company)
+        db.commit()
+        db.refresh(company)
+    return company
+
+
 def normalize_company_name(name: str) -> str:
     """Normalize company name by removing extra whitespace, standardizing case."""
     if not name:

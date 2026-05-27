@@ -5,8 +5,9 @@ from decimal import Decimal
 from sqlalchemy.orm import Session
 
 from app.scrapers.base import BaseScraper
-from app.models import Company, OilPrice
+from app.models import OilPrice
 from app.config import settings
+from app.services.company_service import find_or_create_market_company
 
 class EiaSpotPriceScraper(BaseScraper):
     """Scraper for EIA Spot Prices (WTI, Brent, NY Harbor ULSD) using EIA API v2."""
@@ -71,8 +72,7 @@ class EiaSpotPriceScraper(BaseScraper):
                         
                     price = Decimal(str(round(float(price_val), 4)))
                     
-                    # Find/Create company
-                    company = self._find_or_create_index_company(db, internal_name)
+                    company = find_or_create_market_company(db, internal_name, "https://www.eia.gov")
                     
                     # Check for existing record
                     existing = db.query(OilPrice).filter(
@@ -104,16 +104,3 @@ class EiaSpotPriceScraper(BaseScraper):
                 
         return records
 
-    def _find_or_create_index_company(self, db: Session, name: str) -> Company:
-        company = db.query(Company).filter(Company.name == name).first()
-        if not company:
-            company = Company(
-                name=name,
-                is_market_index=True,
-                website="https://www.eia.gov",
-                phone="N/A"
-            )
-            db.add(company)
-            db.commit()
-            db.refresh(company)
-        return company
