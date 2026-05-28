@@ -982,8 +982,8 @@ async function loadPrices(filters = {}) {
       // Pinned snapshot — fetch the specific snapshot's records from full history
       rawData = await api.getOilPrices({ ...filters, snapshot_id: selectedSnapshotId });
     } else {
-      // Default: latest price per company (no staleness cutoff — show everything)
-      rawData = await api.getLatestPrices({ ...filters, stale_days: 0 });
+      // Default: latest price per company, only prices reported within the last 30 days
+      rawData = await api.getLatestPrices({ ...filters, stale_days: 30 });
     }
 
     currentPricesData = rawData;
