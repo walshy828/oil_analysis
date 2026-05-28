@@ -1310,6 +1310,56 @@ h4 {
   gap: var(--space-sm);
 }
 
+/* ==================== What-If Modal ==================== */
+.whatif-modal {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.whatif-section {
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-md);
+  padding: 1rem;
+}
+
+.whatif-section-title {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-secondary);
+  margin-bottom: 0.6rem;
+}
+
+.whatif-input-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.whatif-result {
+  background: var(--bg-hover);
+  border-radius: var(--radius-sm);
+  padding: 0.65rem 0.85rem;
+  min-height: 2.5rem;
+}
+
+.whatif-result-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.2rem 0;
+}
+
+.wi-fill-btn.wi-active {
+  background: var(--accent-primary);
+  color: #fff;
+  border-color: var(--accent-primary);
+}
+
 /* ==================== Filters ==================== */
 .filter-bar {
   display: flex;

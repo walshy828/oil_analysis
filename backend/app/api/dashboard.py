@@ -23,29 +23,52 @@ def get_season_label(month: int) -> str:
 
 def get_seasonal_burn_rate(db: Session, location_id: int):
     """
-    Returns (avg_daily_gallons, num_days) using the same ±1 calendar month
-    from prior years (data older than 60 days to exclude the current period).
+    Returns (avg_daily_gallons, num_days) using the same calendar month from
+    prior years (older than 60 days). Falls back to ±1 month window if fewer
+    than 14 same-month records exist. Uses IQR-based outlier filtering to
+    prevent anomalous high-usage days from inflating the seasonal estimate.
     Returns (None, 0) if insufficient historical data exists.
     """
     today = date.today()
     month = today.month
-    prev_month = (month - 2) % 12 + 1
-    next_month = month % 12 + 1
-    months_window = [prev_month, month, next_month]
-
     cutoff = today - timedelta(days=60)
 
+    # Primary: exact same calendar month from prior years
     rows = db.query(DailyUsage).filter(
         DailyUsage.location_id == location_id,
         DailyUsage.date < cutoff,
-        extract("month", DailyUsage.date).in_(months_window)
+        extract("month", DailyUsage.date) == month
     ).all()
 
     if len(rows) < 14:
+        # Fallback: ±1 calendar month
+        prev_month = (month - 2) % 12 + 1
+        next_month = month % 12 + 1
+        rows = db.query(DailyUsage).filter(
+            DailyUsage.location_id == location_id,
+            DailyUsage.date < cutoff,
+            extract("month", DailyUsage.date).in_([prev_month, month, next_month])
+        ).all()
+
+    if len(rows) < 7:
         return None, 0
 
-    avg = sum(float(r.gallons) for r in rows) / len(rows)
-    return round(avg, 2), len(rows)
+    values = sorted(float(r.gallons) for r in rows)
+    n = len(values)
+
+    # IQR-based outlier filtering: remove upper fence values
+    q1 = values[n // 4]
+    q3 = values[(3 * n) // 4]
+    iqr = q3 - q1
+    upper_fence = q3 + 1.5 * iqr
+    filtered = [v for v in values if v <= upper_fence]
+
+    # Only apply filtering if it retains at least 70% of records
+    if len(filtered) >= int(n * 0.7):
+        values = filtered
+
+    avg = sum(values) / len(values)
+    return round(avg, 2), n
 
 
 @router.get("/summary")
@@ -221,12 +244,15 @@ async def get_tank_status(
         elif days_remaining < 40:
             urgency = "watch"
 
+    space_available = round(capacity - current_gallons, 1) if current_gallons is not None else None
+
     return {
         "available": True,
         "location_id": location.id,
         "location_name": location.name,
-        "current_gallons": round(current_gallons, 1) if current_gallons else None,
+        "current_gallons": round(current_gallons, 1) if current_gallons is not None else None,
         "capacity_gallons": capacity,
+        "space_available_gallons": space_available,
         "percent_full": round(percent_full, 1) if percent_full else None,
         "avg_daily_usage": round(effective_rate, 2),
         "burn_rate_30d": round(burn_rate_30d, 2),

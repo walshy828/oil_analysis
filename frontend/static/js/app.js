@@ -4289,6 +4289,185 @@ document.getElementById('modal-overlay')?.addEventListener('click', (e) => {
   }
 });
 
+// ==================== Fill Plan / What-If Modal ====================
+
+window.openFillPlanModal = function(tank, minPrice) {
+  const capacity = tank.capacity_gallons || 275;
+  const current = tank.current_gallons || 0;
+  const spaceAvailable = tank.space_available_gallons != null
+    ? tank.space_available_gallons
+    : Math.max(0, capacity - current);
+  const effectiveBurnRate = tank.avg_daily_usage || 0;
+  const defaultPrice = minPrice || 0;
+
+  window._wiState = {
+    capacity, current, spaceAvailable, effectiveBurnRate, defaultPrice,
+    selectedGal: 100,
+  };
+
+  const fillScenariosHtml = spaceAvailable >= 100 ? `
+    <div class="whatif-section">
+      <div class="whatif-section-title">Fill Cost Estimator</div>
+      <p class="text-xs text-secondary mb-sm">
+        Space available: <strong>${spaceAvailable.toFixed(0)} gal</strong>
+        (tank ${current.toFixed(0)} / ${capacity} gal)
+      </p>
+      <div class="whatif-input-row mb-sm">
+        <label class="text-xs text-secondary">Price per gallon ($)</label>
+        <input type="number" id="wi-price" class="form-input" style="width:110px"
+          value="${defaultPrice ? defaultPrice.toFixed(3) : ''}" placeholder="e.g. 3.299"
+          min="0.01" step="0.001">
+      </div>
+      <div class="flex gap-sm mb-sm" style="flex-wrap:wrap">
+        ${[100, 150, 200].map(gal => {
+          const actual = Math.min(gal, spaceAvailable);
+          const disabled = spaceAvailable < gal * 0.5 ? 'opacity-40 pointer-events-none' : '';
+          return `<button class="btn btn-secondary btn-sm wi-fill-btn ${gal === 100 ? 'wi-active' : ''} ${disabled}"
+            onclick="selectFillAmount(${gal})" data-gal="${gal}">${gal} gal${actual < gal ? ` <span style="opacity:0.6;font-size:0.7em">(${actual.toFixed(0)})</span>` : ''}</button>`;
+        }).join('')}
+        <button class="btn btn-ghost btn-sm" onclick="selectFillAmount('custom')">Custom</button>
+      </div>
+      <div id="wi-custom-gal-row" style="display:none" class="mb-sm">
+        <input type="number" id="wi-custom-gal" class="form-input" style="width:130px"
+          placeholder="Gallons" min="1" max="${Math.floor(spaceAvailable)}">
+      </div>
+      <div id="wi-fill-result" class="whatif-result"></div>
+    </div>` : `
+    <div class="whatif-section">
+      <div class="whatif-section-title">Fill Cost Estimator</div>
+      <p class="text-secondary text-sm">Tank is too full for a delivery estimate.</p>
+      <p class="text-xs text-secondary mt-xs">Only ${spaceAvailable.toFixed(0)} gal of space — minimum threshold is 100 gal.</p>
+    </div>`;
+
+  document.getElementById('modal-title').textContent = 'Fill Plan & What-If Analysis';
+  document.getElementById('modal-footer').style.display = 'none';
+  document.getElementById('modal-body').innerHTML = `
+    <div class="whatif-modal">
+      <div class="whatif-section">
+        <div class="whatif-section-title">Burn Rate Estimator</div>
+        <p class="text-xs text-secondary mb-sm">
+          Current: <strong>${effectiveBurnRate.toFixed(2)} gal/day</strong>
+          (${tank.burn_rate_source === 'seasonal' ? (tank.season || '') + ' seasonal avg' : '30-day rolling'})
+          ${tank.burn_rate_30d != null && tank.burn_rate_source === 'seasonal'
+            ? ` · ${tank.burn_rate_30d.toFixed(2)} actual 30d` : ''}
+        </p>
+        <div class="whatif-input-row">
+          <label class="text-xs text-secondary">Override daily burn rate (gal/day)</label>
+          <div class="flex align-center gap-sm">
+            <input type="number" id="wi-burn-rate" class="form-input" style="width:110px"
+              value="${effectiveBurnRate.toFixed(2)}" min="0.01" step="0.05">
+            <button class="btn btn-ghost btn-sm"
+              onclick="document.getElementById('wi-burn-rate').value='${effectiveBurnRate.toFixed(2)}';updateWhatIf()">
+              Reset
+            </button>
+          </div>
+        </div>
+        <div id="wi-burn-result" class="whatif-result mt-sm"></div>
+      </div>
+      ${fillScenariosHtml}
+    </div>`;
+
+  document.getElementById('wi-burn-rate')?.addEventListener('input', updateWhatIf);
+  document.getElementById('wi-price')?.addEventListener('input', updateWhatIf);
+  document.getElementById('wi-custom-gal')?.addEventListener('input', updateWhatIf);
+
+  updateWhatIf();
+  openModal();
+};
+
+window.selectFillAmount = function(gal) {
+  window._wiState.selectedGal = gal;
+  document.querySelectorAll('.wi-fill-btn').forEach(btn => btn.classList.remove('wi-active'));
+  const customRow = document.getElementById('wi-custom-gal-row');
+  if (gal === 'custom') {
+    if (customRow) customRow.style.display = 'block';
+  } else {
+    if (customRow) customRow.style.display = 'none';
+    document.querySelectorAll('.wi-fill-btn').forEach(btn => {
+      if (parseInt(btn.dataset.gal) === gal) btn.classList.add('wi-active');
+    });
+  }
+  updateWhatIf();
+};
+
+function updateWhatIf() {
+  const state = window._wiState;
+  if (!state) return;
+
+  const burnRate = parseFloat(document.getElementById('wi-burn-rate')?.value) || state.effectiveBurnRate;
+
+  // Burn rate section
+  const burnResultEl = document.getElementById('wi-burn-result');
+  if (burnResultEl) {
+    if (burnRate > 0 && state.current > 0) {
+      const daysRemaining = state.current / burnRate;
+      const emptyDate = new Date();
+      emptyDate.setDate(emptyDate.getDate() + Math.round(daysRemaining));
+      const emptyStr = emptyDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+      const delta = burnRate - state.effectiveBurnRate;
+      const deltaHtml = Math.abs(delta) > 0.01
+        ? `<span class="text-xs" style="color:${delta > 0 ? 'var(--accent-error)' : 'var(--accent-success)'}">
+            ${delta > 0 ? '+' : ''}${delta.toFixed(2)} vs current
+           </span>`
+        : '';
+      burnResultEl.innerHTML = `
+        <div class="whatif-result-row">
+          <span class="text-xs text-secondary">Days remaining</span>
+          <span class="font-mono font-bold" style="font-size:1.4rem;color:var(--accent-primary)">${Math.round(daysRemaining)}</span>
+        </div>
+        ${deltaHtml ? `<div class="whatif-result-row">&nbsp;${deltaHtml}</div>` : ''}
+        <div class="whatif-result-row">
+          <span class="text-xs text-secondary">Empty ~</span>
+          <span class="font-mono text-sm">${emptyStr}</span>
+        </div>`;
+    } else {
+      burnResultEl.innerHTML = '<p class="text-xs text-secondary">Enter a valid burn rate to estimate.</p>';
+    }
+  }
+
+  // Fill cost section
+  const fillResultEl = document.getElementById('wi-fill-result');
+  if (!fillResultEl) return;
+
+  const price = parseFloat(document.getElementById('wi-price')?.value) || 0;
+  let gallonsToFill = 0;
+  if (state.selectedGal === 'custom') {
+    gallonsToFill = Math.min(
+      parseFloat(document.getElementById('wi-custom-gal')?.value) || 0,
+      state.spaceAvailable
+    );
+  } else {
+    gallonsToFill = Math.min(state.selectedGal || 100, state.spaceAvailable);
+  }
+
+  if (gallonsToFill > 0 && price > 0) {
+    const cost = gallonsToFill * price;
+    const afterFill = state.current + gallonsToFill;
+    const afterPct = (afterFill / state.capacity * 100).toFixed(0);
+    fillResultEl.innerHTML = `
+      <div class="whatif-result-row">
+        <span class="text-xs text-secondary">Gallons delivered</span>
+        <span class="font-mono font-bold">${gallonsToFill.toFixed(0)} gal</span>
+      </div>
+      <div class="whatif-result-row">
+        <span class="text-xs text-secondary">Price / gal</span>
+        <span class="font-mono">$${price.toFixed(3)}</span>
+      </div>
+      <div class="whatif-result-row" style="border-top:1px solid var(--border-primary);padding-top:0.5rem;margin-top:0.25rem">
+        <span class="text-xs text-secondary">Estimated cost</span>
+        <span class="font-mono font-bold" style="font-size:1.3rem;color:var(--accent-success)">$${cost.toFixed(2)}</span>
+      </div>
+      <div class="whatif-result-row">
+        <span class="text-xs text-secondary opacity-60">Tank after fill</span>
+        <span class="text-xs font-mono opacity-60">${afterFill.toFixed(0)} gal (${afterPct}%)</span>
+      </div>`;
+  } else if (gallonsToFill > 0) {
+    fillResultEl.innerHTML = '<p class="text-xs text-secondary">Enter a price per gallon above to see cost.</p>';
+  } else {
+    fillResultEl.innerHTML = '<p class="text-xs text-secondary">Select a fill scenario above.</p>';
+  }
+}
+
 // ==================== Toast Notifications ====================
 
 function showToast(message, type = 'info') {
@@ -5732,6 +5911,10 @@ async function renderCommandCenter(container) {
   const urgencyColors = { critical: 'var(--accent-error)', low: 'var(--accent-warning)', watch: '#f59e0b', ok: 'var(--accent-success)' };
   const tankColor = urgencyColors[urgency] || 'var(--accent-success)';
 
+  // Store for what-if modal
+  window._lastTankData = tank;
+  window._lastMinPrice = minPrice;
+
   // Tank gauge SVG
   const pct = Math.min(100, Math.max(0, tank.percent_full || 0));
   const gaugeCircumference = 2 * Math.PI * 54;
@@ -5820,20 +6003,26 @@ async function renderCommandCenter(container) {
                 <div class="grid grid-2 gap-sm mt-xs">
                   <div>
                     <div class="text-xs text-secondary">Burn Rate</div>
-                    <div class="text-sm font-mono font-bold">${tank.avg_daily_usage != null ? tank.avg_daily_usage.toFixed(1) : '—'} gal/day</div>
+                    <div class="text-sm font-mono font-bold">${tank.avg_daily_usage != null ? tank.avg_daily_usage.toFixed(2) : '—'} gal/day</div>
                     ${tank.burn_rate_source === 'seasonal' && tank.season
-                      ? `<div class="text-xs" style="color:var(--text-secondary);opacity:0.75;">${tank.season} avg · ${tank.seasonal_data_days || '?'}d</div>`
+                      ? `<div class="text-xs" style="color:var(--text-secondary);opacity:0.75;">${tank.season} hist · ${tank.seasonal_data_days || '?'}d</div>`
                       : `<div class="text-xs text-secondary opacity-60">30-day rolling</div>`}
                     ${tank.burn_rate_source === 'seasonal' && tank.burn_rate_30d != null
-                      ? `<div class="text-xs text-secondary opacity-50">${tank.burn_rate_30d.toFixed(1)} actual 30d</div>`
+                      ? `<div class="text-xs" style="color:var(--text-secondary);opacity:0.5">${tank.burn_rate_30d.toFixed(2)} actual 30d</div>`
                       : ''}
                   </div>
                   <div>
-                    <div class="text-xs text-secondary">Capacity</div>
-                    <div class="text-sm font-mono font-bold">${tank.capacity_gallons || '—'} gal</div>
+                    <div class="text-xs text-secondary">Space Available</div>
+                    <div class="text-sm font-mono font-bold">${tank.space_available_gallons != null ? tank.space_available_gallons.toFixed(0) : '—'} gal</div>
+                    <div class="text-xs text-secondary opacity-60">${tank.capacity_gallons || '—'} cap</div>
                   </div>
                 </div>
-                ${tank.last_reading_at ? `<div class="text-xs text-secondary">Last reading: ${formatDateTime(tank.last_reading_at)}</div>` : ''}
+                ${tank.last_reading_at ? `<div class="text-xs text-secondary mt-xs">Last reading: ${formatDateTime(tank.last_reading_at)}</div>` : ''}
+                <button class="btn btn-ghost btn-sm mt-sm" style="width:100%;justify-content:center;gap:0.35rem;border:1px solid var(--border-primary);"
+                  onclick="openFillPlanModal(window._lastTankData, window._lastMinPrice)">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+                  Plan Fill / What-If
+                </button>
               </div>
             </div>
           </div>
