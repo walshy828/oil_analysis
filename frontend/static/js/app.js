@@ -780,10 +780,29 @@ let showPriceHistory = false;
 let groupPricesByCompany = false;
 let viewType = 'local';
 let scrapeHistoryFilters = { configId: '', days: 30 };
+let selectedSnapshotId = '';   // '' = latest (DISTINCT ON); UUID = pin to that snapshot
 
 async function renderPricesPage(container) {
   selectedPrices.clear();
   currentPricesData = [];
+
+  // Load available snapshots for the selector
+  let snapshots = [];
+  try {
+    snapshots = await api.getSnapshots(viewType, 30);
+  } catch (_) { /* snapshots unavailable — selector will just show "Latest" */ }
+
+  const snapshotOptions = [
+    { value: '', label: 'Latest (all vendors)', selected: selectedSnapshotId === '' },
+    ...snapshots.map(s => {
+      const scrapeDate = s.scraped_at ? formatDate(s.scraped_at.split('T')[0]) : '?';
+      return {
+        value: s.snapshot_id,
+        label: `${scrapeDate} — ${s.company_count} vendors`,
+        selected: selectedSnapshotId === s.snapshot_id
+      };
+    })
+  ];
 
   // Build unified header
   const headerHtml = generateUnifiedHeader({
@@ -817,6 +836,17 @@ async function renderPricesPage(container) {
               { value: 'all', label: 'Local & Market', selected: viewType === 'all' },
               { value: 'market', label: 'Market Only', selected: viewType === 'market' }
             ]
+          }
+        ]
+      },
+      {
+        label: 'Snapshot',
+        items: [
+          {
+            type: 'select',
+            id: 'snapshot-select',
+            onchange: 'selectSnapshot(this.value)',
+            options: snapshotOptions
           }
         ]
       },
@@ -944,9 +974,17 @@ async function loadPrices(filters = {}) {
     filters.sort_by = sortBy;
     filters.order = sortOrder;
 
-    // Default view: latest batch (one price per company from most recent snapshot).
-    // "Show Full History" loads all historical records.
-    let rawData = showPriceHistory ? await api.getOilPrices(filters) : await api.getLatestPrices(filters);
+    let rawData;
+    if (showPriceHistory) {
+      // Full history — all records matching the filters
+      rawData = await api.getOilPrices(filters);
+    } else if (selectedSnapshotId) {
+      // Pinned snapshot — fetch the specific snapshot's records from full history
+      rawData = await api.getOilPrices({ ...filters, snapshot_id: selectedSnapshotId });
+    } else {
+      // Default: latest price per company (no staleness cutoff — show everything)
+      rawData = await api.getLatestPrices({ ...filters, stale_days: 0 });
+    }
 
     currentPricesData = rawData;
     selectedPrices.clear();
@@ -1053,6 +1091,17 @@ function togglePriceHistory() {
   loadPrices(getCurrentFilters());
 }
 
+function selectSnapshot(snapshotId) {
+  selectedSnapshotId = snapshotId;
+  // When a specific snapshot is pinned, history mode doesn't apply
+  if (snapshotId) {
+    showPriceHistory = false;
+    const histToggle = document.getElementById('toggle-history');
+    if (histToggle) histToggle.checked = false;
+  }
+  loadPrices(getCurrentFilters());
+}
+
 function toggleGroupCompany() {
   groupPricesByCompany = document.getElementById('toggle-group-company').checked;
   // Re-render table structure if needed, but loadPrices handles body
@@ -1061,7 +1110,9 @@ function toggleGroupCompany() {
 
 function toggleViewType() {
   viewType = document.getElementById('view-type-select').value;
-  loadPrices(getCurrentFilters());
+  selectedSnapshotId = '';
+  // Re-render to reload snapshot list for the new type
+  renderPricesPage(document.getElementById('page-content'));
 }
 
 function getCurrentFilters() {
@@ -1258,22 +1309,10 @@ async function renderCompaniesPage(container) {
   if (showMergedCompanies) {
     companiesData = await api.getCompanies({ merged: true });
   } else {
-    companiesData = await api.getLatestPrices();
-  }
-
-  // Filter based on snapshot date if applicable (only for active companies with prices)
-  if (!showMergedCompanies && snapshotFilter !== 'all') {
-    const days = parseInt(snapshotFilter);
-    const cutoff = new Date();
-    cutoff.setDate(cutoff.getDate() - days);
-
-    companiesData = companiesData.filter(c => {
-      if (!c.date_reported) return false;
-      const parts = c.date_reported.split('-');
-      if (parts.length < 3) return false;
-      const reported = new Date(parts[0], parts[1] - 1, parts[2]);
-      return reported >= cutoff;
-    });
+    // stale_days=0 means no cutoff (All Time).
+    // snapshotFilter values: '7', '30', '90', '365', 'all'
+    const staleDays = snapshotFilter === 'all' ? 0 : parseInt(snapshotFilter) || 0;
+    companiesData = await api.getLatestPrices({ stale_days: staleDays });
   }
 
   selectedCompanies = [];

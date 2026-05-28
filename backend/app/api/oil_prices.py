@@ -30,6 +30,7 @@ async def list_oil_prices(
     price_max: Optional[Decimal] = None,
     town: Optional[str] = None,
     type: str = Query("local", regex="^(local|market|all)$"),
+    snapshot_id: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
     query = db.query(OilPrice, Company.name.label('company_name')).join(Company)
@@ -53,6 +54,8 @@ async def list_oil_prices(
         query = query.filter(OilPrice.price_per_gallon <= price_max)
     if town:
         query = query.filter(OilPrice.town.ilike(f"%{town}%"))
+    if snapshot_id:
+        query = query.filter(OilPrice.snapshot_id == snapshot_id)
 
     results = query.order_by(desc(OilPrice.date_reported)).offset(skip).limit(limit).all()
 
@@ -75,25 +78,23 @@ async def get_latest_prices(
     type: str = Query("local", regex="^(local|market|all)$"),
     sort_by: str = Query("price", regex="^(price|name|date)$"),
     order: str = Query("asc", regex="^(asc|desc)$"),
-    stale_days: int = Query(30, description="Filter out companies with no price update in this many days"),
+    stale_days: int = Query(0, ge=0, description="Age-out filter on date_reported. 0 = no limit."),
     db: Session = Depends(get_db)
 ):
     """
-    Return the most recent price per company from the latest scrape batch.
+    Return the single most-recent price per company.
 
-    Strategy:
-    1. Find the latest snapshot_id that actually contains prices for the
-       requested type (local/market/all).  This avoids a cross-type mismatch
-       where, e.g., the globally newest snapshot is from an EIA run that has
-       no local prices, causing empty results.
-    2. Return all distinct-per-company prices from that snapshot.
-    3. Fall back to DISTINCT ON with a date_reported staleness cut-off when
-       no snapshot data exists for this type (e.g., prices were CSV-imported).
+    Uses DISTINCT ON ordered by date_reported DESC — no snapshot_id restriction.
+    This correctly handles both scraper-sourced prices (with snapshot_id) and
+    CSV-imported prices (snapshot_id IS NULL), returning whichever record is
+    newest for each company regardless of origin.
+
+    stale_days > 0: exclude companies whose most recent price is older than N days.
+    stale_days = 0: no age-out (return all companies ever seen).
     """
     from sqlalchemy import text
     from datetime import timedelta
 
-    # Build a type-scoped WHERE fragment (no user input interpolated directly)
     if type == "local":
         type_sql = "AND c.is_market_index = FALSE"
     elif type == "market":
@@ -101,37 +102,11 @@ async def get_latest_prices(
     else:
         type_sql = ""
 
-    # Find the latest snapshot that has data for this specific type
-    latest_snapshot_id = db.execute(text(f"""
-        SELECT p.snapshot_id
-        FROM oil_prices p
-        JOIN companies c ON p.company_id = c.id
-        WHERE p.snapshot_id IS NOT NULL
-          AND c.merged_into_id IS NULL
-          {type_sql}
-        ORDER BY p.scraped_at DESC NULLS LAST
-        LIMIT 1
-    """)).scalar()
-
     params: dict = {}
-
-    if latest_snapshot_id:
-        where_clause = f"""
-            WHERE c.merged_into_id IS NULL
-              {type_sql}
-              AND p.snapshot_id = :snapshot_id
-        """
-        params["snapshot_id"] = latest_snapshot_id
-    else:
-        # No scraper-generated data for this type — fall back to most-recent
-        # price per company, filtered by staleness.
-        cutoff = date.today() - timedelta(days=stale_days)
-        where_clause = f"""
-            WHERE c.merged_into_id IS NULL
-              {type_sql}
-              AND p.date_reported >= :cutoff
-        """
-        params["cutoff"] = cutoff
+    staleness_sql = ""
+    if stale_days > 0:
+        params["cutoff"] = date.today() - timedelta(days=stale_days)
+        staleness_sql = "AND p.date_reported >= :cutoff"
 
     query_text = f"""
         SELECT DISTINCT ON (p.company_id)
@@ -147,8 +122,10 @@ async def get_latest_prices(
             p.snapshot_id
         FROM oil_prices p
         JOIN companies c ON p.company_id = c.id
-        {where_clause}
-        ORDER BY p.company_id, p.scraped_at DESC NULLS LAST, p.date_reported DESC
+        WHERE c.merged_into_id IS NULL
+          {type_sql}
+          {staleness_sql}
+        ORDER BY p.company_id, p.date_reported DESC, p.scraped_at DESC NULLS LAST
     """
     rows = db.execute(text(query_text), params).fetchall()
 
@@ -220,6 +197,55 @@ async def get_latest_prices(
         response.sort(key=lambda x: x["date_reported"] or "", reverse=reverse)
 
     return response
+
+
+@router.get("/snapshots")
+async def list_snapshots(
+    type: str = Query("local", regex="^(local|market|all)$"),
+    limit: int = Query(30),
+    db: Session = Depends(get_db)
+):
+    """
+    Return a list of distinct scrape snapshots (by snapshot_id + scraped_at date),
+    newest first. Used to populate the snapshot selector in the Price Explorer.
+    Snapshots with NULL snapshot_id are excluded (CSV imports have no batch identity).
+    """
+    from sqlalchemy import text
+
+    if type == "local":
+        type_sql = "AND c.is_market_index = FALSE"
+    elif type == "market":
+        type_sql = "AND c.is_market_index = TRUE"
+    else:
+        type_sql = ""
+
+    rows = db.execute(text(f"""
+        SELECT
+            p.snapshot_id,
+            MIN(p.scraped_at)  AS scraped_at,
+            MIN(p.date_reported) AS earliest_reported,
+            MAX(p.date_reported) AS latest_reported,
+            COUNT(DISTINCT p.company_id) AS company_count
+        FROM oil_prices p
+        JOIN companies c ON p.company_id = c.id
+        WHERE p.snapshot_id IS NOT NULL
+          AND c.merged_into_id IS NULL
+          {type_sql}
+        GROUP BY p.snapshot_id
+        ORDER BY MIN(p.scraped_at) DESC NULLS LAST
+        LIMIT :limit
+    """), {"limit": limit}).fetchall()
+
+    return [
+        {
+            "snapshot_id": r.snapshot_id,
+            "scraped_at": r.scraped_at.isoformat() if r.scraped_at else None,
+            "earliest_reported": r.earliest_reported.isoformat() if r.earliest_reported else None,
+            "latest_reported": r.latest_reported.isoformat() if r.latest_reported else None,
+            "company_count": r.company_count,
+        }
+        for r in rows
+    ]
 
 
 @router.get("/history/{company_id}")

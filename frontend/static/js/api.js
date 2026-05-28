@@ -193,6 +193,9 @@ class ApiClient {
         params.append(key, value);
       }
     });
+    // stale_days=0 means "no age-out" — all companies regardless of last price date.
+    // Callers may pass stale_days > 0 to filter out stale vendors.
+    if (!('stale_days' in filters)) params.append('stale_days', '0');
     return this.request(`/oil-prices/latest?${params}`);
   }
 
@@ -380,6 +383,10 @@ class ApiClient {
 
   async syncSmartOilGauge() {
     return this.request('/tank/sync', { method: 'POST' });
+  }
+
+  async getSnapshots(type = 'local', limit = 30) {
+    return this.request(`/oil-prices/snapshots?type=${type}&limit=${limit}`);
   }
 
   // Temperature / Weather
