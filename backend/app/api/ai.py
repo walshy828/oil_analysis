@@ -187,7 +187,7 @@ LOCAL MARKET (Central MA):
 
 UPSTREAM SIGNALS:
 - NY Harbor ULSD: ${f'{ulsd["price"]:.3f}' if ulsd.get("price") else 'N/A'}/gal (as of {ulsd.get('date', 'N/A')})
-- ULSD 7-day change: {f'+{ctx["ulsd_7d_change"]:.4f}' if (ctx.get("ulsd_7d_change") or 0) >= 0 else f'{ctx["ulsd_7d_change"]:.4f}'}/gal
+- ULSD 7-day change: {f'{ctx["ulsd_7d_change"]:+.4f}' if ctx.get("ulsd_7d_change") is not None else 'N/A'}/gal
 - WTI Crude: ${f'{wti["price"]:.2f}' if wti.get("price") else 'N/A'}/bbl
 - Recent HDD (14 days): {ctx.get('recent_hdd_14d', 'N/A')} (heating demand)
 
