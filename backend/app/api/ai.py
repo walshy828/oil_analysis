@@ -8,6 +8,7 @@ import re
 from app.database import get_db
 from app.models import TankReading, Location, OilPrice, Company, DailyUsage, Temperature, OilOrder
 from app.config import settings
+from app.api.dashboard import get_seasonal_burn_rate, get_season_label
 
 router = APIRouter()
 
@@ -45,13 +46,24 @@ async def _gather_context(db: Session) -> dict:
 
         current_gallons = float(reading.gallons) if reading else None
         capacity = float(location.tank_capacity or 275)
-        days_remaining = (current_gallons / avg_daily) if (current_gallons and avg_daily > 0) else None
+
+        # Seasonal burn rate from prior-year same-period data
+        seasonal_rate, seasonal_days = get_seasonal_burn_rate(db, location.id)
+        effective_rate = seasonal_rate if seasonal_rate is not None else avg_daily
+        burn_rate_source = "seasonal" if seasonal_rate is not None else "30d_rolling"
+        season = get_season_label(date.today().month)
+
+        days_remaining = (current_gallons / effective_rate) if (current_gallons and effective_rate > 0) else None
 
         tank_data = {
             "current_gallons": round(current_gallons, 1) if current_gallons else None,
             "capacity_gallons": capacity,
             "percent_full": round((current_gallons / capacity) * 100, 1) if current_gallons else None,
-            "avg_daily_usage_gallons": round(avg_daily, 2),
+            "avg_daily_usage_gallons": round(effective_rate, 2),
+            "burn_rate_30d": round(avg_daily, 2),
+            "burn_rate_seasonal": seasonal_rate,
+            "burn_rate_source": burn_rate_source,
+            "season": season,
             "days_remaining": round(days_remaining, 0) if days_remaining else None,
             "estimated_depletion_date": (date.today() + timedelta(days=int(days_remaining))).isoformat() if days_remaining else None,
         }
@@ -175,7 +187,8 @@ CURRENT DATA ({ctx['analysis_date']}):
 
 TANK:
 - Level: {tank.get('current_gallons', 'Unknown')} gal ({tank.get('percent_full', '?')}% of {tank.get('capacity_gallons', 275)} gal capacity)
-- Daily burn rate: {tank.get('avg_daily_usage_gallons', '?')} gal/day (30-day avg)
+- Daily burn rate: {tank.get('avg_daily_usage_gallons', '?')} gal/day ({tank.get('burn_rate_source', '30d_rolling')} — {tank.get('season', 'Unknown')} season avg)
+- 30-day rolling rate: {tank.get('burn_rate_30d', '?')} gal/day
 - Estimated days remaining: {tank.get('days_remaining', 'Unknown')}
 - Projected empty date: {tank.get('estimated_depletion_date', 'Unknown')}
 

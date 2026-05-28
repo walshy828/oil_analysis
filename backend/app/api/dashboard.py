@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import func, desc
+from sqlalchemy import func, desc, extract
 from datetime import date, timedelta
 from typing import Optional
 from statistics import mean
@@ -9,6 +9,43 @@ from app.database import get_db
 from app.models import OilPrice, OilOrder, Company, Temperature, Location, TankReading, DailyUsage
 
 router = APIRouter()
+
+
+def get_season_label(month: int) -> str:
+    if month in (12, 1, 2):
+        return "Winter"
+    if month in (3, 4, 5):
+        return "Spring"
+    if month in (6, 7, 8):
+        return "Summer"
+    return "Fall"
+
+
+def get_seasonal_burn_rate(db: Session, location_id: int):
+    """
+    Returns (avg_daily_gallons, num_days) using the same ±1 calendar month
+    from prior years (data older than 60 days to exclude the current period).
+    Returns (None, 0) if insufficient historical data exists.
+    """
+    today = date.today()
+    month = today.month
+    prev_month = (month - 2) % 12 + 1
+    next_month = month % 12 + 1
+    months_window = [prev_month, month, next_month]
+
+    cutoff = today - timedelta(days=60)
+
+    rows = db.query(DailyUsage).filter(
+        DailyUsage.location_id == location_id,
+        DailyUsage.date < cutoff,
+        extract("month", DailyUsage.date).in_(months_window)
+    ).all()
+
+    if len(rows) < 14:
+        return None, 0
+
+    avg = sum(float(r.gallons) for r in rows) / len(rows)
+    return round(avg, 2), len(rows)
 
 
 @router.get("/summary")
@@ -152,12 +189,23 @@ async def get_tank_status(
         total_usage = sum(float(u.gallons) for u in usage_rows)
         days_with_data = len(usage_rows)
 
-    avg_daily = total_usage / days_with_data if days_with_data > 0 else 0
+    burn_rate_30d = total_usage / days_with_data if days_with_data > 0 else 0
+
+    # Seasonal rate: same ±1 calendar month from prior years
+    seasonal_rate, seasonal_days = get_seasonal_burn_rate(db, location.id)
+    if seasonal_rate is not None:
+        effective_rate = seasonal_rate
+        burn_rate_source = "seasonal"
+    else:
+        effective_rate = burn_rate_30d
+        burn_rate_source = "30d_rolling"
+
+    season = get_season_label(date.today().month)
 
     current_gallons = float(reading.gallons) if reading else None
     capacity = float(location.tank_capacity or 275)
     percent_full = (current_gallons / capacity * 100) if current_gallons else None
-    days_remaining = (current_gallons / avg_daily) if (current_gallons and avg_daily > 0) else None
+    days_remaining = (current_gallons / effective_rate) if (current_gallons and effective_rate > 0) else None
 
     depletion_date = None
     if days_remaining:
@@ -180,7 +228,12 @@ async def get_tank_status(
         "current_gallons": round(current_gallons, 1) if current_gallons else None,
         "capacity_gallons": capacity,
         "percent_full": round(percent_full, 1) if percent_full else None,
-        "avg_daily_usage": round(avg_daily, 2),
+        "avg_daily_usage": round(effective_rate, 2),
+        "burn_rate_30d": round(burn_rate_30d, 2),
+        "burn_rate_seasonal": seasonal_rate,
+        "burn_rate_source": burn_rate_source,
+        "season": season,
+        "seasonal_data_days": seasonal_days,
         "days_remaining": round(days_remaining, 0) if days_remaining else None,
         "estimated_depletion": depletion_date,
         "urgency": urgency,

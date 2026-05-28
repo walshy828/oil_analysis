@@ -5821,6 +5821,12 @@ async function renderCommandCenter(container) {
                   <div>
                     <div class="text-xs text-secondary">Burn Rate</div>
                     <div class="text-sm font-mono font-bold">${tank.avg_daily_usage != null ? tank.avg_daily_usage.toFixed(1) : '—'} gal/day</div>
+                    ${tank.burn_rate_source === 'seasonal' && tank.season
+                      ? `<div class="text-xs" style="color:var(--text-secondary);opacity:0.75;">${tank.season} avg · ${tank.seasonal_data_days || '?'}d</div>`
+                      : `<div class="text-xs text-secondary opacity-60">30-day rolling</div>`}
+                    ${tank.burn_rate_source === 'seasonal' && tank.burn_rate_30d != null
+                      ? `<div class="text-xs text-secondary opacity-50">${tank.burn_rate_30d.toFixed(1)} actual 30d</div>`
+                      : ''}
                   </div>
                   <div>
                     <div class="text-xs text-secondary">Capacity</div>
