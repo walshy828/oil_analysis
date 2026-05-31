@@ -21,6 +21,16 @@ MARKET_COMMODITIES = {
         "symbol": "BZ=F",
         "name": "Market Index: Brent Crude",
         "url": "https://finance.yahoo.com/quote/BZ=F"
+    },
+    "wti": {
+        "symbol": "CL=F",
+        "name": "Market Index: WTI Crude",
+        "url": "https://finance.yahoo.com/quote/CL=F"
+    },
+    "rbob_gasoline": {
+        "symbol": "RB=F",
+        "name": "Market Index: RBOB Gasoline",
+        "url": "https://finance.yahoo.com/quote/RB=F"
     }
 }
 
@@ -33,7 +43,7 @@ class MarketCommoditiesScraper(BaseScraper):
     
     @classmethod
     def get_description(cls) -> str:
-        return "Scrapes NY Harbor ULSD and Brent Crude prices from Yahoo Finance"
+        return "Scrapes NY Harbor ULSD, Brent Crude, WTI Crude, and RBOB Gasoline prices from Yahoo Finance"
     
     async def scrape(self, db: Session, snapshot_id: str = None, scraped_at: datetime = None) -> List[Dict[str, Any]]:
         """Scrape market prices."""
