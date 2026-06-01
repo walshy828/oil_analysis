@@ -431,7 +431,7 @@ async function renderDashboard(container) {
     api.getOrderInsights(),
     api.getTemperatureCorrelation(),
     api.getLeadLagAnalysis(startStr, todayStr),
-    api.getLatestPrices({ type: 'local' }),
+    api.getLatestPrices({ type: 'local', stale_days: 30 }),
     api.getCrackSpread(startStr, todayStr)
   ]);
 
@@ -439,7 +439,7 @@ async function renderDashboard(container) {
   let snapshotHtml = '';
   let insightBanner = '';
   if (latestPrices && latestPrices.length > 0) {
-    // Use all latest prices as requested (no filtering by freshness)
+    // Only prices reported within the last 30 days (enforced server-side via stale_days=30)
     const activePrices = latestPrices;
 
     const prices = activePrices.map(p => p.price_per_gallon);
@@ -455,8 +455,8 @@ async function renderDashboard(container) {
     const isStale = hoursSinceUpdate > 24;
 
     // Vendor Spread Visualization
-    // Vendor Spread Visualization
-    // Group prices to handle overlaps
+    // Group prices by exact price to handle overlapping dots
+    const nowMs = Date.now();
     const priceGroups = {};
     activePrices.forEach(p => {
       const priceKey = p.price_per_gallon.toFixed(3);
@@ -464,16 +464,37 @@ async function renderDashboard(container) {
       priceGroups[priceKey].push(p);
     });
 
-    const vendorDots = Object.values(priceGroups).sort((a, b) => a[0].price_per_gallon - b[0].price_per_gallon).map(group => {
+    const sortedGroups = Object.values(priceGroups).sort((a, b) => a[0].price_per_gallon - b[0].price_per_gallon);
+
+    const vendorDots = sortedGroups.map(group => {
       const p = group[0]; // Representative
       const count = group.length;
 
       const pct = spread > 0 ? ((p.price_per_gallon - minPrice) / spread) * 100 : 0;
       const isCheapest = p.price_per_gallon === minPrice;
-      const color = isCheapest ? 'var(--accent-success)' : 'rgba(255,255,255,0.4)';
-      const zIndex = isCheapest ? 20 : 10;
 
-      // Make dot slightly larger if it represents multiple vendors
+      // Format date (use latest from group)
+      const dates = group.map(g => new Date(g.date_reported));
+      const maxDate = new Date(Math.max(...dates));
+      const dateStr = maxDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+
+      // Staleness tinting: dim dots older than 14 days within the 30-day window
+      const ageDays = (nowMs - maxDate.getTime()) / (1000 * 60 * 60 * 24);
+      const isRecent = ageDays <= 14;
+
+      let color, zIndex;
+      if (isCheapest) {
+        color = 'var(--accent-success)';
+        zIndex = 20;
+      } else if (isRecent) {
+        color = 'rgba(255,255,255,0.55)';
+        zIndex = 10;
+      } else {
+        color = 'rgba(255,255,255,0.22)';
+        zIndex = 8;
+      }
+
+      // Dot size
       let size = isCheapest ? 14 : 8;
       if (count > 1 && !isCheapest) size = 10;
       if (count > 1 && isCheapest) size = 16;
@@ -483,29 +504,38 @@ async function renderDashboard(container) {
       if (pct < 20) tooltipClass = 'tooltip-left';
       else if (pct > 80) tooltipClass = 'tooltip-right';
 
-      // Format date (use latest from group)
-      const dates = group.map(g => new Date(g.date_reported));
-      const maxDate = new Date(Math.max(...dates));
-      const dateStr = maxDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-
       // Build Tooltip Text
       let tooltipText;
       const priceStr = `$${p.price_per_gallon.toFixed(3)}`;
+      const staleNote = !isRecent ? ' (14+ days ago)' : '';
 
       if (count === 1) {
-        tooltipText = `${p.company_name}\n${priceStr} • ${dateStr}`;
+        tooltipText = `${p.company_name}\n${priceStr} • ${dateStr}${staleNote}`;
       } else {
-        // List up to 3 names, then "+ X others"
         const names = group.map(g => g.company_name);
         let nameStr = names.slice(0, 3).join(', ');
         if (names.length > 3) nameStr += ` (+${names.length - 3} others)`;
-        tooltipText = `${count} Vendors @ ${priceStr}\n${nameStr}\n${dateStr}`;
+        tooltipText = `${count} Vendors @ ${priceStr}\n${nameStr}\n${dateStr}${staleNote}`;
       }
 
-      return `<div class="vendor-dot ${tooltipClass}" 
-                  style="left:${pct}%; background:${color}; z-index:${zIndex}; width:${size}px; height:${size}px;"
+      // Extra ring on cheapest dot so it stands out even without hover
+      const ringStyle = isCheapest
+        ? 'box-shadow: 0 0 0 3px rgba(74,222,128,0.4), 0 1px 3px rgba(0,0,0,0.3);'
+        : 'box-shadow: 0 1px 3px rgba(0,0,0,0.3);';
+
+      return `<div class="vendor-dot ${tooltipClass}"
+                  style="left:${pct}%; background:${color}; z-index:${zIndex}; width:${size}px; height:${size}px; ${ringStyle}"
                   data-tooltip="${tooltipText}"></div>`;
     }).join('');
+
+    // Persistent cheapest-vendor label below the track
+    const cheapestGroup = sortedGroups[0];
+    const cheapestDate = new Date(Math.max(...cheapestGroup.map(g => new Date(g.date_reported))));
+    const cheapestDateStr = cheapestDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+    const cheapestNames = cheapestGroup.map(g => g.company_name);
+    let cheapestLabel = cheapestNames[0];
+    if (cheapestNames.length > 1) cheapestLabel += ` (+${cheapestNames.length - 1} tied)`;
+    const savingsVsAvg = avgPrice - minPrice;
 
     // --- Expert Prediction Logic ---
     const predictionText = leadLag.analysis?.prediction || 'Stable';
@@ -524,7 +554,6 @@ async function renderDashboard(container) {
     // --- Buy/Wait Recommendation ---
     const isPriceLow = minPrice <= (summary.avg_price_30d * 1.01); // 1% range of 30d avg
     const lagDays = leadLag.analysis?.optimal_lag || 0;
-    const cheapestVendor = activePrices.find(p => p.price_per_gallon === minPrice);
 
     snapshotHtml = `
       <div class="card mb-lg animate-fade-in glass-effect" style="border-left: 4px solid ${isPredictedUp ? 'var(--accent-error)' : isPredictedDown ? 'var(--accent-success)' : 'var(--border-primary)'};">
@@ -579,36 +608,42 @@ async function renderDashboard(container) {
 
            <div class="flex flex-column gap-lg">
              <div class="grid grid-3 gap-md mobile-grid-1">
-                 <div class="p-md rounded bg-secondary-alt border-primary">
-                     <div class="text-xs text-secondary uppercase tracking-wider mb-xs">Lowest Local Price</div>
+                 <div class="p-md rounded border-primary" style="background: rgba(74,222,128,0.08); border: 1px solid rgba(74,222,128,0.35);">
+                     <div class="text-xs uppercase tracking-wider mb-xs font-bold" style="color: var(--accent-success);">Best Price (30-day window)</div>
                      <div class="text-2xl font-bold font-mono text-success">$${minPrice.toFixed(3)}</div>
-                     <div class="text-xs text-secondary truncate mt-xs" title="${cheapestVendor?.company_name || ''}">${cheapestVendor?.company_name || 'N/A'}</div>
+                     <div class="text-xs truncate mt-xs font-bold" style="color:var(--accent-success);" title="${cheapestLabel}">${cheapestLabel}</div>
+                     <div class="text-xs text-secondary mt-xs">Last reported: ${cheapestDateStr}</div>
                  </div>
                  <div class="p-md rounded bg-secondary-alt border-primary">
                      <div class="text-xs text-secondary uppercase tracking-wider mb-xs">Market Average</div>
                      <div class="text-2xl font-bold font-mono">$${avgPrice.toFixed(3)}</div>
-                     <div class="text-xs ${avgPrice > minPrice ? 'text-error' : 'text-success'} mt-xs">
-                        ${avgPrice > minPrice ? `+$${(avgPrice - minPrice).toFixed(3)} Above Best Price` : 'Leading Market Price'}
+                     <div class="text-xs mt-xs ${savingsVsAvg > 0 ? 'text-success' : 'text-secondary'}">
+                        ${savingsVsAvg > 0 ? `Best price saves $${savingsVsAvg.toFixed(3)}/gal vs avg` : 'Best price matches market avg'}
                      </div>
                  </div>
                  <div class="p-md rounded bg-secondary-alt border-primary">
                       <div class="text-xs text-secondary uppercase tracking-wider mb-xs">Vendor Spread</div>
                       <div class="text-2xl font-bold font-mono">$${spread.toFixed(2)}</div>
-                      <div class="text-xs text-secondary mt-xs">Price range across ${activePrices.length} companies</div>
+                      <div class="text-xs text-secondary mt-xs">${activePrices.length} vendors with prices ≤30 days old</div>
                  </div>
              </div>
 
              <div>
                 <div class="flex flex-between align-end mb-sm">
-                    <span class="text-xs font-bold uppercase text-secondary">Price Landscape (Min to Max)</span>
+                    <span class="text-xs font-bold uppercase text-secondary">Vendor Price Spread — hover dots for details</span>
+                    <span class="text-xs text-secondary">
+                        <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--accent-success);vertical-align:middle;margin-right:4px;"></span>Cheapest
+                        <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:rgba(255,255,255,0.55);vertical-align:middle;margin-left:8px;margin-right:4px;"></span>&lt;14d
+                        <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:rgba(255,255,255,0.22);vertical-align:middle;margin-left:8px;margin-right:4px;"></span>14–30d
+                    </span>
                 </div>
                 <div class="market-spread-viz">
                    <div class="spread-track"></div>
                    ${vendorDots}
                    <div class="spread-labels">
-                      <span class="text-xs text-secondary font-mono">$${minPrice.toFixed(2)}</span>
-                      <span class="text-xs text-secondary font-mono" style="left: 50%; transform: translateX(-50%); position: absolute;">AVG: $${avgPrice.toFixed(2)}</span>
-                      <span class="text-xs text-secondary font-mono">$${maxPrice.toFixed(2)}</span>
+                      <span class="text-xs font-mono" style="color:var(--accent-success);">$${minPrice.toFixed(3)}</span>
+                      <span class="text-xs text-secondary font-mono" style="left: 50%; transform: translateX(-50%); position: absolute;">AVG: $${avgPrice.toFixed(3)}</span>
+                      <span class="text-xs text-secondary font-mono">$${maxPrice.toFixed(3)}</span>
                    </div>
                 </div>
              </div>
@@ -5887,18 +5922,25 @@ async function renderCommandCenter(container) {
     api.getDashboardSummary(),
     api.getDashboardTankStatus(),
     api.getPriceTrends(90),
-    api.getLatestPrices({ type: 'local' }),
+    api.getLatestPrices({ type: 'local', stale_days: 30 }),
     api.getLeadLagAnalysis(startStr, todayStr),
     api.getCrackSpread(startStr, todayStr),
     api.getOrderInsights(),
   ]);
 
-  // Derived values
+  // Derived values — latestPrices already filtered to ≤30 days server-side
   const prices = (latestPrices || []).map(p => p.price_per_gallon);
   const minPrice = prices.length ? Math.min(...prices) : null;
   const maxPrice = prices.length ? Math.max(...prices) : null;
   const avgPrice = prices.length ? prices.reduce((a, b) => a + b, 0) / prices.length : null;
-  const cheapestVendor = latestPrices && minPrice != null ? latestPrices.find(p => p.price_per_gallon === minPrice) : null;
+  const cheapestVendors = latestPrices && minPrice != null ? latestPrices.filter(p => p.price_per_gallon === minPrice) : [];
+  const cheapestVendor = cheapestVendors[0] || null;
+  const cheapestDateStr = cheapestVendor
+    ? new Date(cheapestVendor.date_reported).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+    : null;
+  const savingsVsAvg = (avgPrice != null && minPrice != null) ? avgPrice - minPrice : 0;
+  let cheapestLabel = cheapestVendor?.company_name || '';
+  if (cheapestVendors.length > 1) cheapestLabel += ` (+${cheapestVendors.length - 1} tied)`;
 
   const predictionText = leadLag?.analysis?.prediction || 'Stable';
   const isPredUp = predictionText.includes('Rise') || predictionText.includes('Upward');
@@ -5933,10 +5975,11 @@ async function renderCommandCenter(container) {
       </svg>
     </div>`;
 
-  // Build vendor spread dots
+  // Build vendor spread dots — prices already filtered to ≤30 days
   let vendorSpreadHtml = '';
   if (latestPrices && latestPrices.length > 0 && minPrice != null && maxPrice != null) {
     const spread = maxPrice - minPrice;
+    const nowMs = Date.now();
     const groups = {};
     latestPrices.forEach(p => {
       const k = p.price_per_gallon.toFixed(3);
@@ -5947,18 +5990,50 @@ async function renderCommandCenter(container) {
       const p = group[0];
       const pctPos = spread > 0 ? ((p.price_per_gallon - minPrice) / spread) * 100 : 0;
       const isCheap = p.price_per_gallon === minPrice;
-      const size = isCheap ? 14 : 8;
-      const color = isCheap ? 'var(--accent-success)' : 'rgba(255,255,255,0.35)';
+
+      // Use most recent date from group
+      const groupDates = group.map(g => new Date(g.date_reported));
+      const groupMaxDate = new Date(Math.max(...groupDates));
+      const ageDays = (nowMs - groupMaxDate.getTime()) / (1000 * 60 * 60 * 24);
+      const isRecent = ageDays <= 14;
+      const dotDateStr = groupMaxDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+      const staleNote = !isRecent ? ' (14+ days ago)' : '';
+
+      let color, ringStyle;
+      if (isCheap) {
+        color = 'var(--accent-success)';
+        ringStyle = 'box-shadow:0 0 0 3px rgba(74,222,128,0.4),0 1px 3px rgba(0,0,0,0.3);';
+      } else if (isRecent) {
+        color = 'rgba(255,255,255,0.55)';
+        ringStyle = 'box-shadow:0 1px 3px rgba(0,0,0,0.3);';
+      } else {
+        color = 'rgba(255,255,255,0.22)';
+        ringStyle = 'box-shadow:0 1px 3px rgba(0,0,0,0.3);';
+      }
+
+      const size = isCheap ? (group.length > 1 ? 16 : 14) : (group.length > 1 ? 10 : 8);
+
       const names = group.map(g => g.company_name);
-      const label = group.length === 1 ? names[0] : `${group.length} vendors`;
+      let tooltipName = group.length === 1 ? names[0] : `${group.length} vendors: ${names.slice(0, 2).join(', ')}${names.length > 2 ? ` +${names.length - 2}` : ''}`;
+      const tooltipText = `${tooltipName}\n$${p.price_per_gallon.toFixed(3)} • ${dotDateStr}${staleNote}`;
       let tooltipClass = pctPos < 20 ? 'tooltip-left' : pctPos > 80 ? 'tooltip-right' : 'tooltip-center';
-      return `<div class="vendor-dot ${tooltipClass}" style="left:${pctPos}%;background:${color};width:${size}px;height:${size}px;" data-tooltip="${label}\n$${p.price_per_gallon.toFixed(3)}"></div>`;
+
+      return `<div class="vendor-dot ${tooltipClass}" style="left:${pctPos}%;background:${color};width:${size}px;height:${size}px;${ringStyle}" data-tooltip="${tooltipText}"></div>`;
     }).join('');
+
     vendorSpreadHtml = `
-      <div class="market-spread-viz mt-sm mb-xs">
+      <div class="flex flex-between align-center mb-xs" style="margin-top:0.5rem;">
+        <span class="text-xs text-secondary font-bold uppercase">Vendor Price Spread</span>
+        <span class="text-xs text-secondary">
+          <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--accent-success);vertical-align:middle;margin-right:3px;"></span>Cheapest
+          <span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:rgba(255,255,255,0.55);vertical-align:middle;margin-left:6px;margin-right:3px;"></span>&lt;14d
+          <span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:rgba(255,255,255,0.22);vertical-align:middle;margin-left:6px;margin-right:3px;"></span>14–30d
+        </span>
+      </div>
+      <div class="market-spread-viz mb-xs">
         <div class="spread-track"></div>${dots}
         <div class="spread-labels">
-          <span class="text-xs font-mono text-secondary">$${minPrice.toFixed(3)}</span>
+          <span class="text-xs font-mono" style="color:var(--accent-success);">$${minPrice.toFixed(3)}</span>
           <span class="text-xs font-mono text-secondary" style="position:absolute;left:50%;transform:translateX(-50%)">avg $${avgPrice.toFixed(3)}</span>
           <span class="text-xs font-mono text-secondary">$${maxPrice.toFixed(3)}</span>
         </div>
@@ -6038,15 +6113,17 @@ async function renderCommandCenter(container) {
           </div>
           <div class="card-body">
             <div class="grid grid-3 gap-md mb-md">
-              <div>
-                <div class="text-xs text-secondary uppercase tracking-widest">Best Price</div>
+              <div class="p-sm rounded" style="background:rgba(74,222,128,0.08);border:1px solid rgba(74,222,128,0.3);">
+                <div class="text-xs uppercase tracking-widest font-bold" style="color:var(--accent-success);">Best Price</div>
                 <div class="text-2xl font-bold font-mono text-success">${minPrice != null ? '$' + minPrice.toFixed(3) : '—'}</div>
-                <div class="text-xs text-secondary truncate">${cheapestVendor?.company_name || ''}</div>
+                <div class="text-xs font-bold truncate" style="color:var(--accent-success);" title="${cheapestLabel}">${cheapestLabel}</div>
+                ${cheapestDateStr ? `<div class="text-xs text-secondary" style="margin-top:2px;">Reported: ${cheapestDateStr}</div>` : ''}
+                ${savingsVsAvg > 0.001 ? `<div class="text-xs text-success" style="margin-top:2px;">Saves $${savingsVsAvg.toFixed(3)}/gal vs avg</div>` : ''}
               </div>
               <div>
                 <div class="text-xs text-secondary uppercase tracking-widest">Market Avg</div>
                 <div class="text-2xl font-bold font-mono">${avgPrice != null ? '$' + avgPrice.toFixed(3) : '—'}</div>
-                <div class="text-xs text-secondary">${latestPrices?.length || 0} vendors</div>
+                <div class="text-xs text-secondary">${latestPrices?.length || 0} vendors ≤30d</div>
               </div>
               <div>
                 <div class="text-xs text-secondary uppercase tracking-widest">Crack Spread</div>
