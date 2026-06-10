@@ -1352,15 +1352,29 @@ async function renderCompaniesPage(container) {
 
   selectedCompanies = [];
 
-  // Calculate lowest price for active view to show diffs
+  // Calculate the "cheapest" reference price for diff highlighting.
+  // Always anchored to vendors with a date_reported within the last 30 days so
+  // that stale vendors (e.g. July 2023 CSV imports) in an "All Time" view can't
+  // become the baseline that makes every current vendor look expensive.
   let minPrice = Infinity;
   if (!showMergedCompanies && companiesData.length > 0) {
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
     companiesData.forEach(c => {
       const p = parseFloat(c.price_per_gallon);
-      if (!isNaN(p) && p > 0 && p < minPrice) {
+      const reported = c.date_reported ? new Date(c.date_reported) : null;
+      if (!isNaN(p) && p > 0 && p < minPrice && reported && reported >= thirtyDaysAgo) {
         minPrice = p;
       }
     });
+    // If no vendor has a fresh price fall back to the overall min so the column
+    // still renders — this only happens when all data in the table is stale.
+    if (minPrice === Infinity) {
+      companiesData.forEach(c => {
+        const p = parseFloat(c.price_per_gallon);
+        if (!isNaN(p) && p > 0 && p < minPrice) minPrice = p;
+      });
+    }
   }
   if (minPrice === Infinity) minPrice = null;
 

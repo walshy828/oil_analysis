@@ -382,35 +382,41 @@ class UsageNormalizer:
         """
         Detect and smooth spikes by comparing each day against its neighbors.
         A spike is defined as usage > 2x the local median (7-day window).
+
+        The absolute-gap threshold is season-aware: summer days (HDD < 5,
+        cap = 2 gal/day) use a tighter gap of 0.75 gal so that anomalies like
+        1.5 gal/day are caught when the running median is ~0.5 gal/day.
+        Winter days keep the original 1.5 gal gap.
         """
         if len(allocations) < 7:
             return allocations
-        
+
         values = [a['gallons'] for a in allocations]
-        
+
         for i in range(len(allocations)):
             # Define window (3 days before, 3 days after)
             start_idx = max(0, i - 3)
             end_idx = min(len(allocations), i + 4)
             window = values[start_idx:end_idx]
-            
+
             # Exclude the current value from median calculation
             neighbors = [v for j, v in enumerate(window) if j != (i - start_idx)]
             if not neighbors:
                 continue
-            
+
             local_median = float(np.median(neighbors))
             current_val = float(allocations[i]['gallons'])
-            
-            # Spike Detection Criteria:
-            # 1. Current value > 2x local median
-            # 2. Current value > local median + 1.5 gallons (absolute threshold)
-            # 3. Must exceed a minimum threshold (0.5) to avoid false positives on tiny values
+
+            # Season-aware absolute gap: tighter in summer (HDD < 5) so low-burn
+            # anomalies that would pass the winter threshold are still caught.
+            hdd = allocations[i].get('hdd', 0) or 0
+            abs_gap = 0.75 if hdd < 5 else 1.5
+
             is_spike = (
-                current_val > max(local_median * 2.0, local_median + 1.5) and
+                current_val > max(local_median * 2.0, local_median + abs_gap) and
                 current_val > 0.5
             )
-            
+
             if is_spike:
                 # Replace with interpolated value (average of neighbors)
                 smoothed_val = float(np.mean(neighbors))
@@ -419,8 +425,8 @@ class UsageNormalizer:
                 allocations[i]['spike_smoothed'] = True
                 if not allocations[i].get('adjustment_reason'):
                     allocations[i]['adjustment_reason'] = 'spike_smoothed'
-                logger.info(f"Spike detected on {allocations[i]['date']}: {current_val:.2f} -> {smoothed_val:.2f} (median: {local_median:.2f})")
-        
+                logger.info(f"Spike detected on {allocations[i]['date']}: {current_val:.2f} -> {smoothed_val:.2f} (median: {local_median:.2f}, hdd: {hdd:.1f})")
+
         return allocations
 
     def _process_open_ended_period(self, location_id: int, start_date: date):

@@ -74,43 +74,45 @@ def get_seasonal_burn_rate(db: Session, location_id: int):
 @router.get("/summary")
 async def get_dashboard_summary(db: Session = Depends(get_db)):
     """Get dashboard summary with latest price, last order, and key metrics."""
-    
-    # Get latest scrape timestamp for local vendors
-    latest_scrape_time = db.query(func.max(OilPrice.scraped_at)).join(Company).filter(
-        Company.is_market_index == False
-    ).scalar()
-    
+    from sqlalchemy import text
+
     latest_price_info = None
     cheapest_info = None
-    
-    if latest_scrape_time:
-        # 1. Find the absolute minimum price in the latest scrape for local vendors
-        min_price = db.query(func.min(OilPrice.price_per_gallon)).join(Company).filter(
-            OilPrice.scraped_at == latest_scrape_time,
-            Company.is_market_index == False
-        ).scalar()
-        
-        if min_price is not None:
-            # 2. Get all companies that have this minimum price
-            cheapest_entries = db.query(OilPrice, Company).join(Company).filter(
-                OilPrice.scraped_at == latest_scrape_time,
-                OilPrice.price_per_gallon == min_price,
-                Company.is_market_index == False
-            ).all()
-            
-            company_names = ", ".join([c.name for p, c in cheapest_entries])
-            first_entry = cheapest_entries[0][0]
-            
-            latest_price_info = {
-                "price": float(min_price),
-                "date": first_entry.date_reported.isoformat(),
-                "company": company_names
-            }
-            
-            cheapest_info = {
-                "name": company_names,
-                "price": float(min_price)
-            }
+
+    # Find the cheapest current price using the same per-company DISTINCT ON logic
+    # as /oil-prices/latest?stale_days=30, so the summary KPI and the price-signal
+    # dots always agree.  Only vendors whose most recent date_reported falls within
+    # the last 30 days are considered — this eliminates prices whose date_reported
+    # is years old regardless of when they were scraped.
+    thirty_days_ago = date.today() - timedelta(days=30)
+    fresh_rows = db.execute(text("""
+        SELECT DISTINCT ON (p.company_id)
+            p.price_per_gallon,
+            p.date_reported,
+            p.scraped_at,
+            c.name AS company_name
+        FROM oil_prices p
+        JOIN companies c ON p.company_id = c.id
+        WHERE c.is_market_index = FALSE
+          AND c.merged_into_id IS NULL
+          AND p.date_reported >= :cutoff
+        ORDER BY p.company_id, p.date_reported DESC, p.scraped_at DESC NULLS LAST
+    """), {"cutoff": thirty_days_ago}).fetchall()
+
+    if fresh_rows:
+        min_price = min(float(r.price_per_gallon) for r in fresh_rows)
+        cheapest = [r for r in fresh_rows if float(r.price_per_gallon) == min_price]
+        company_names = ", ".join(r.company_name for r in cheapest)
+
+        latest_price_info = {
+            "price": min_price,
+            "date": cheapest[0].date_reported.isoformat() if cheapest[0].date_reported else None,
+            "company": company_names,
+        }
+        cheapest_info = {
+            "name": company_names,
+            "price": min_price,
+        }
     
     # Get last oil order
     last_order = db.query(OilOrder, Location, Company).outerjoin(

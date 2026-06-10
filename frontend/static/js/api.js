@@ -193,9 +193,9 @@ class ApiClient {
         params.append(key, value);
       }
     });
-    // stale_days=0 means "no age-out" — all companies regardless of last price date.
-    // Callers may pass stale_days > 0 to filter out stale vendors.
-    if (!('stale_days' in filters)) params.append('stale_days', '0');
+    // Default to 30-day freshness so unguarded calls never surface stale data.
+    // Pass stale_days: 0 explicitly to opt into all-time data (e.g. Companies "All Time" view).
+    if (!('stale_days' in filters)) params.append('stale_days', '30');
     return this.request(`/oil-prices/latest?${params}`);
   }
 

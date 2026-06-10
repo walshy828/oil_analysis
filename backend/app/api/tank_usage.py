@@ -129,11 +129,19 @@ async def get_usage_summary(
     total_usage = sum(d['usage'] for d in daily_usage)
     avg_daily = total_usage / len(daily_usage) if daily_usage else 0
     
-    # Get latest local oil price for cost estimation
+    # Get latest local oil price for cost estimation.
+    # Prefer a price reported within the last 30 days; fall back to the
+    # all-time latest so cost estimation still works when scrapers are lagging.
+    thirty_days_ago = date.today() - timedelta(days=30)
     latest_price = db.query(OilPrice).join(Company).filter(
-        Company.is_market_index == False
+        Company.is_market_index == False,
+        OilPrice.date_reported >= thirty_days_ago,
     ).order_by(desc(OilPrice.date_reported)).first()
-    
+    if not latest_price:
+        latest_price = db.query(OilPrice).join(Company).filter(
+            Company.is_market_index == False
+        ).order_by(desc(OilPrice.date_reported)).first()
+
     price_per_gallon = float(latest_price.price_per_gallon) if latest_price else 0
     estimated_cost = total_usage * price_per_gallon
     

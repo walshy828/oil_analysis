@@ -11,64 +11,104 @@ import pytz
 
 from app.config import settings
 from app.database import SessionLocal
-from app.models import ScrapeConfig, ScrapeHistory
+from app.models import ScrapeConfig, ScrapeHistory, Location
 from app.models.scrape_config import ScheduleType
 from app.scrapers import get_scraper
 
 SCHEDULE_TZ = pytz.timezone('America/New_York')
 
+# Scraper types that produce tank readings and therefore require a usage
+# normalization pass after every successful run.
+_TANK_SCRAPER_TYPES = {"smart_oil_gauge"}
+
+
+def _run_usage_normalization(db, label: str = "") -> None:
+    """
+    Recalculate the last 45 days of DailyUsage for every location.
+
+    Called inline after a successful tank-data scrape so the normalized burn
+    rate and Home Assistant endpoint always reflect the freshest readings.
+    Errors are logged and swallowed — a normalization failure must never
+    retroactively mark a completed scrape as failed.
+    """
+    from app.services.usage_normalization import UsageNormalizer
+
+    tag = f"[{label}] " if label else ""
+    try:
+        locations = db.query(Location).all()
+        normalizer = UsageNormalizer(db)
+        for loc in locations:
+            try:
+                normalizer.recalculate_usage(loc.id, days=45)
+                print(f"[{datetime.now()}] {tag}Usage normalization complete: "
+                      f"{loc.name} (id={loc.id})")
+            except Exception as exc:
+                print(f"[{datetime.now()}] {tag}Usage normalization failed: "
+                      f"{loc.name} (id={loc.id}) — {exc}")
+                db.rollback()
+    except Exception as exc:
+        print(f"[{datetime.now()}] {tag}Usage normalization outer error: {exc}")
+
 
 async def run_scrape_job(config_id: int):
     """Execute a scrape job."""
     db = SessionLocal()
-    
+
     try:
         config = db.query(ScrapeConfig).filter(ScrapeConfig.id == config_id).first()
         if not config or not config.enabled:
             return
-        
+
         # Generate snapshot ID for this scrape run
         snapshot_id = str(uuid.uuid4())
         scrape_ts = datetime.utcnow()
-        
+
         # Create history record
         history = ScrapeHistory(
-            config_id=config_id, 
+            config_id=config_id,
             status="running",
             snapshot_id=snapshot_id
         )
         db.add(history)
         db.commit()
         db.refresh(history)
-        
+
         print(f"[{datetime.now()}] Starting scrape: {config.name} (snapshot: {snapshot_id[:8]}...)")
-        
+
         try:
             # Get the appropriate scraper
             scraper = get_scraper(config.scraper_type, config.url)
-            
+
             # Run the scraper with snapshot metadata
             records = await scraper.scrape(db, snapshot_id=snapshot_id, scraped_at=scrape_ts)
-            
+
             # Update history with scraped data summary
             history.status = "success"
             history.records_scraped = len(records)
             history.completed_at = datetime.utcnow()
             history.scraped_data = records  # Store the scraped records summary
-            
+
             # Update config last run
             config.last_run = scrape_ts
-            
+
             print(f"[{datetime.now()}] Scrape completed: {config.name} - {len(records)} records")
-            
+
         except Exception as e:
             history.status = "failed"
             history.error_message = str(e)
             history.completed_at = datetime.utcnow()
             print(f"[{datetime.now()}] Scrape failed: {config.name} - {str(e)}")
-        
+
+        # Commit scrape result before any post-processing so the history
+        # record is durable regardless of what happens next.
         db.commit()
-        
+
+        # Post-scrape hook: normalise usage immediately after any scraper
+        # that writes tank readings, so the HA endpoint is always fresh.
+        if config.scraper_type in _TANK_SCRAPER_TYPES and history.status == "success":
+            print(f"[{datetime.now()}] Running post-scrape usage normalization for {config.name}...")
+            _run_usage_normalization(db, label=config.name)
+
     finally:
         db.close()
 

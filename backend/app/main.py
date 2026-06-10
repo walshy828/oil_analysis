@@ -7,7 +7,7 @@ import logging
 from app.config import settings
 from app.auth import verify_api_key
 from app.database import engine, Base
-from app.api import dashboard, companies, oil_prices, locations, oil_orders, temperatures, scrape, system, analytics, tank_usage, historical_import, ai
+from app.api import dashboard, companies, oil_prices, locations, oil_orders, temperatures, scrape, system, analytics, tank_usage, historical_import, ai, integrations
 
 
 # Configure logging
@@ -78,6 +78,7 @@ app.include_router(system.router, prefix="/api/system", tags=["System"], depende
 app.include_router(tank_usage.router, prefix="/api/tank", tags=["Tank Usage"], dependencies=_auth)
 app.include_router(historical_import.router, prefix="/api/import", tags=["Historical Import"], dependencies=_auth)
 app.include_router(ai.router, prefix="/api/ai", tags=["AI Analysis"], dependencies=_auth)
+app.include_router(integrations.router, prefix="/api/integrations", tags=["Integrations"], dependencies=_auth)
 
 
 @app.get("/health")
