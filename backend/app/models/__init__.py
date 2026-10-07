@@ -6,6 +6,7 @@ from app.models.temperature import Temperature
 from app.models.scrape_config import ScrapeConfig, ScrapeHistory
 from app.models.tank_reading import TankReading
 from app.models.daily_usage import DailyUsage
+from app.models.market_indicator import MarketIndicator, MarketEvent
 
 __all__ = [
     "Company",
@@ -18,5 +19,7 @@ __all__ = [
     "ScrapeHistory",
     "TankReading",
     "DailyUsage",
+    "MarketIndicator",
+    "MarketEvent",
 ]
 

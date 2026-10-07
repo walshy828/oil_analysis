@@ -199,10 +199,27 @@ async def get_lead_lag_analysis(
     elif score >= 1: prediction = "Slight Upward Pressure"
     elif score <= -2: prediction = "Fall Likely"
     elif score <= -1: prediction = "Slight Downward Pressure"
-        
+
+    # Prefer the multi-signal model (inventories, curve, positioning, weather, ...) once enough
+    # feeds are populated; otherwise keep the simple futures + crack heuristic above.
+    prediction_source = "futures_heuristic"
+    prediction_confidence = None
+    try:
+        from app.services.market_signals import compute_outlook
+        outlook = compute_outlook(db)
+        days = outlook["horizons"]["days"]
+        if days["score"] is not None and days.get("signals_used", 0) >= 4:
+            prediction = days["outlook"]
+            prediction_confidence = days["confidence"]
+            prediction_source = "signal_model"
+    except Exception:
+        pass
+
     return {
         "analysis": {
             "prediction": prediction,
+            "prediction_source": prediction_source,
+            "prediction_confidence": prediction_confidence,
             "futures_trend_7d": round(market_trend_7d, 4),
             "local_trends": {
                 "7d": local_trend_7d,

@@ -50,9 +50,9 @@ The backend and worker both mount `./backend:/app` so code changes are reflected
 
 **Entry point**: `main.py` — wires up all FastAPI routers, starts APScheduler for the `daily_usage_update` cron job (03:00 daily).
 
-**Routers** (`api/`): `dashboard`, `analytics`, `companies`, `oil_prices`, `locations`, `oil_orders`, `temperatures`, `scrape`, `system`, `tank_usage`, `historical_import` — all mounted under `/api/<resource>`.
+**Routers** (`api/`): `dashboard`, `analytics`, `companies`, `oil_prices`, `locations`, `oil_orders`, `temperatures`, `scrape`, `system`, `tank_usage`, `historical_import`, `market_intel` — all mounted under `/api/<resource>`.
 
-**Models** (`models/`): SQLAlchemy ORM models — `Company`, `CompanyAlias`, `OilPrice`, `Location`, `OilOrder`, `Temperature`, `ScrapeConfig`, `ScrapeHistory`, `TankReading`, `DailyUsage`. All use the shared `Base` from `database.py`.
+**Models** (`models/`): SQLAlchemy ORM models — `Company`, `CompanyAlias`, `OilPrice`, `Location`, `OilOrder`, `Temperature`, `ScrapeConfig`, `ScrapeHistory`, `TankReading`, `DailyUsage`, `MarketIndicator`, `MarketEvent`. All use the shared `Base` from `database.py`.
 
 **Schemas** (`schemas/`): Pydantic v2 schemas for request/response validation, mirroring the model structure.
 
@@ -69,7 +69,7 @@ Plugin architecture via `SCRAPER_REGISTRY` dict in `__init__.py`. To add a new s
 2. Implement `scrape(db, snapshot_id, scraped_at) -> List[Dict]` and `get_scraper_type() -> str`
 3. Add to `SCRAPER_REGISTRY` in `__init__.py`
 
-Each scrape run gets a `snapshot_id` (UUID) written to `ScrapeHistory` for data lineage. Currently registered scrapers: `newengland_oil`, `market_commodities`, `eia_spot_prices`, `weather`, `smart_oil_gauge`.
+Each scrape run gets a `snapshot_id` (UUID) written to `ScrapeHistory` for data lineage. Currently registered scrapers: `newengland_oil`, `market_commodities`, `eia_spot_prices`, `weather`, `smart_oil_gauge`, plus the Market Intel feeds `eia_market_data`, `cftc_cot`, `futures_curve`, `weather_forecast`.
 
 **Smart Oil Gauge scraper**: Logs in via form POST, calls the AJAX API to get tank list/details, saves current level via `TankService`, then exports a 30-day CSV history. Currently hardcoded to use `db.query(Location).first()`.
 
@@ -79,8 +79,10 @@ Each scrape run gets a `snapshot_id` (UUID) written to `ScrapeHistory` for data 
 
 **`UsageNormalizer`**: Builds the `DailyUsage` table from raw tank readings and oil orders. Strategy selection: if sensor-derived total drop is within 50–150% of the known delivery volume, use sensor data (shaped to delivery total); otherwise fall back to HDD-weighted estimation using a k-factor (gallons/HDD) derived from recent confirmed data. Applies a seasonal daily cap (2 gal/day in summer, 15 gal/day in winter) and contextual spike smoothing (7-day median window).
 
+**Market Intel signal model** (`services/market_signals.py`, `api/market_intel.py`): feeds write to the generic `market_indicators` table (one row per `series_key` per date; ULSD contracts are stored per delivery month as `ho_fut:YYYYMM`). `SignalContext` loads every series once; each `sig_*` function scores one signal -2..+2 for the days/weeks/months horizons "as of" a date, and `WEIGHTS` combines them into an outlook, confidence and drivers. The same code powers `/api/market-intel/backtest`. `MarketEvent` rows (hand-logged geopolitical events) feed the `events` signal. `POST /api/market-intel/setup` creates the four feed `ScrapeConfig`s; `POST /api/market-intel/curve/import` loads a ULSD curve by hand because the free Yahoo source can return HTTP 429. `python backend/verify_market_feeds.py` checks the feeds against the live sources. `/api/analytics/lead-lag` uses the model's days-horizon outlook once at least 4 signals are available.
+
 ### Frontend (`frontend/static/`)
-Vanilla HTML/JS/CSS — no build step. Nginx serves the files directly. API calls go to `/api/*` which nginx proxies to the backend container.
+Vanilla HTML/JS/CSS — no build step. Market Intel panels live in `js/market-intel.js`. Nginx serves the files directly. API calls go to `/api/*` which nginx proxies to the backend container.
 
 ### Scheduling
 Two independent schedulers:

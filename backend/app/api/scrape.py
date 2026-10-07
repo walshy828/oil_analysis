@@ -156,6 +156,10 @@ async def get_scraper_types():
             {"id": "eia_spot_prices", "name": "EIA Spot Prices", "description": "Daily WTI, Brent, and NY Harbor ULSD Spot Prices from EIA.gov"},
             {"id": "smart_oil_gauge", "name": "Smart Oil Gauge", "description": "Scrapes current oil level and history from Smart Oil Gauge app"},
             {"id": "weather", "name": "Weather Data", "description": "Updates daily temperature history for all locations"},
+            {"id": "eia_market_data", "name": "EIA Market Fundamentals", "description": "Distillate stocks (US, PADD 1, New England), exports, refinery utilization, MA retail heating oil, natural gas, propane"},
+            {"id": "cftc_cot", "name": "CFTC Positioning", "description": "Managed-money net position in ULSD and WTI futures (weekly)"},
+            {"id": "futures_curve", "name": "ULSD Forward Curve", "description": "NYMEX ULSD 12-month curve and ICE gasoil"},
+            {"id": "weather_forecast", "name": "HDD Forecast & ENSO", "description": "15-day heating degree day forecast vs normal and NOAA ONI"},
             {"id": "water", "name": "Water Rates", "description": "Water utility rates (coming soon)", "disabled": True},
             {"id": "electric", "name": "Electric Rates", "description": "Electric utility rates (coming soon)", "disabled": True},
         ]

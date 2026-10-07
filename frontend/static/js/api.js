@@ -489,6 +489,58 @@ class ApiClient {
     return this.request(url, { method: 'POST' });
   }
 
+  // Market Intel (signal model, feeds, events)
+  async getMarketSignals() {
+    return this.request('/market-intel/signals');
+  }
+
+  async getMarketWeeklyChanges() {
+    return this.request('/market-intel/weekly-changes');
+  }
+
+  async getMarketBacktest(days = 365, step = 7) {
+    return this.request(`/market-intel/backtest?days=${days}&step=${step}`);
+  }
+
+  async getMarketCrackChart(dateFrom, dateTo) {
+    const params = new URLSearchParams();
+    if (dateFrom) params.append('date_from', dateFrom);
+    if (dateTo) params.append('date_to', dateTo);
+    return this.request(`/market-intel/charts/crack?${params}`);
+  }
+
+  async getMarketCurveChart() {
+    return this.request('/market-intel/charts/curve');
+  }
+
+  async getMarketStocksChart(series = 'padd1a') {
+    return this.request(`/market-intel/charts/stocks?series=${series}`);
+  }
+
+  async getMarketFeeds() {
+    return this.request('/market-intel/feeds');
+  }
+
+  async setupMarketFeeds() {
+    return this.request('/market-intel/setup', { method: 'POST' });
+  }
+
+  async importMarketCurve(payload) {
+    return this.request('/market-intel/curve/import', { method: 'POST', body: payload });
+  }
+
+  async getMarketEvents(includeInactive = false) {
+    return this.request(`/market-intel/events?include_inactive=${includeInactive}`);
+  }
+
+  async createMarketEvent(payload) {
+    return this.request('/market-intel/events', { method: 'POST', body: payload });
+  }
+
+  async deleteMarketEvent(id) {
+    return this.request(`/market-intel/events/${id}`, { method: 'DELETE' });
+  }
+
   // AI Analysis
   async getAiAnalysis() {
     return this.request('/ai/analysis');

@@ -4,6 +4,10 @@ from app.scrapers.market_commodities import MarketCommoditiesScraper
 from app.scrapers.eia_spot import EiaSpotPriceScraper
 from app.scrapers.weather import WeatherScraper
 from app.scrapers.smart_oil_gauge import SmartOilGaugeScraper
+from app.scrapers.eia_market_data import EiaMarketDataScraper
+from app.scrapers.cftc_cot import CftcCotScraper
+from app.scrapers.futures_curve import FuturesCurveScraper
+from app.scrapers.weather_forecast import WeatherForecastScraper
 
 # Registry of available scrapers
 SCRAPER_REGISTRY = {
@@ -12,6 +16,10 @@ SCRAPER_REGISTRY = {
     "eia_spot_prices": EiaSpotPriceScraper,
     "weather": WeatherScraper,
     "smart_oil_gauge": SmartOilGaugeScraper,
+    "eia_market_data": EiaMarketDataScraper,
+    "cftc_cot": CftcCotScraper,
+    "futures_curve": FuturesCurveScraper,
+    "weather_forecast": WeatherForecastScraper,
 }
 
 

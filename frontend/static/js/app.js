@@ -5024,6 +5024,9 @@ async function renderAnalyticsPage(container) {
             </div>
         </div>
 
+        <!-- Multi-signal outlook by horizon + weekly changes (market-intel.js) -->
+        <div id="mi-top"></div>
+
         <!-- Charts Grid - Responsive 2:1 layout -->
         <div class="analytics-charts-grid">
             <!-- Lead-Lag Analysis (Main Chart) -->
@@ -5089,6 +5092,9 @@ async function renderAnalyticsPage(container) {
                 </div>
             </div>
         </div>
+
+        <!-- Signal breakdown, supply charts, event log, feeds, backtest (market-intel.js) -->
+        <div id="mi-bottom" class="mt-lg"></div>
 
         <!-- Additional Trend Charts -->
         <div class="analytics-charts-grid mt-lg">
@@ -5221,6 +5227,11 @@ async function renderAnalyticsPage(container) {
 
   } catch (err) {
     showToast("Error loading analytics: " + err.message, "error");
+  }
+
+  // Multi-signal outlook, supply charts, events, feeds (js/market-intel.js)
+  if (typeof renderMarketIntelPanels === 'function') {
+    renderMarketIntelPanels().catch(err => console.error('Market Intel panels failed:', err));
   }
 
   // Fetch and Render Temperature Correlation for Analytics
