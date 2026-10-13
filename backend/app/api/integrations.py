@@ -19,7 +19,7 @@ All endpoints accept an optional `location_id` query param; if omitted the
 first location is used (single-house installations don't need it).
 """
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
 import numpy as np
@@ -30,8 +30,12 @@ from sqlalchemy.orm import Session
 from app.api.dashboard import get_season_label, get_seasonal_burn_rate
 from app.database import get_db
 from app.models import Company, DailyUsage, Location, OilOrder, OilPrice, TankReading
+from app.services import market_signals as ms
 
 router = APIRouter()
+
+# A move smaller than this over the window is reported as "stable".
+TREND_STABLE_BAND_PCT = {7: 1.0, 30: 2.0}
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -79,11 +83,141 @@ def _smoothed_burn_stats(usage_rows) -> dict:
     }
 
 
+def _usage_hdd_block(usage_rows) -> dict:
+    """Latest day's usage and heating demand plus 7d / 30d HDD averages and efficiency.
+
+    `gallons_per_hdd_*` is total gallons / total HDD over the window (days with no
+    HDD are skipped); a rising value means the house burns more oil per unit of cold.
+    """
+    keys = [
+        "usage_latest_date", "usage_latest_gallons", "usage_latest_source",
+        "usage_vs_7d_avg_pct", "usage_total_7d", "usage_total_30d",
+        "hdd_latest", "hdd_avg_7d", "hdd_avg_30d", "hdd_total_7d", "hdd_total_30d",
+        "temp_avg_latest", "gallons_per_hdd_7d", "gallons_per_hdd_30d",
+    ]
+    out = dict.fromkeys(keys)
+    if not usage_rows:
+        return out
+    rows = sorted(usage_rows, key=lambda r: r.date)
+    latest = rows[-1]
+    out["usage_latest_date"] = latest.date.isoformat()
+    out["usage_latest_gallons"] = round(float(latest.gallons), 2)
+    out["usage_latest_source"] = latest.source
+    out["hdd_latest"] = round(float(latest.hdd), 1) if latest.hdd is not None else None
+    out["temp_avg_latest"] = (
+        round(float(latest.temperature_avg), 1) if latest.temperature_avg is not None else None
+    )
+
+    for n in (7, 30):
+        win = rows[-n:]
+        gal = sum(float(r.gallons) for r in win)
+        hdds = [float(r.hdd) for r in win if r.hdd is not None]
+        out[f"usage_total_{n}d"] = round(gal, 1)
+        if hdds:
+            out[f"hdd_total_{n}d"] = round(sum(hdds), 1)
+            out[f"hdd_avg_{n}d"] = round(sum(hdds) / len(hdds), 1)
+        hdd_days = [r for r in win if r.hdd]
+        hdd_sum = sum(float(r.hdd) for r in hdd_days)
+        if hdd_sum > 0:
+            out[f"gallons_per_hdd_{n}d"] = round(
+                sum(float(r.gallons) for r in hdd_days) / hdd_sum, 3)
+
+    prior = [float(r.gallons) for r in rows[-8:-1]]
+    if prior and sum(prior) > 0:
+        avg = sum(prior) / len(prior)
+        out["usage_vs_7d_avg_pct"] = round((float(latest.gallons) / avg - 1) * 100, 1)
+    return out
+
+
 def _resolve_location(db: Session, location_id: Optional[int]) -> Optional[Location]:
     q = db.query(Location)
     if location_id:
         q = q.filter(Location.id == location_id)
     return q.first()
+
+
+def _utc_iso(dt: datetime) -> str:
+    """ISO-8601 with explicit UTC offset. DB timestamps are naive UTC; HA timestamp
+    sensors reject datetimes without a timezone."""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc).isoformat()
+
+
+def _trend_label(pct: Optional[float], days: int) -> Optional[str]:
+    if pct is None:
+        return None
+    band = TREND_STABLE_BAND_PCT[days]
+    return "rising" if pct > band else "falling" if pct < -band else "stable"
+
+
+def _pressure_label(score: Optional[float]) -> Optional[str]:
+    if score is None:
+        return None
+    return "upward" if score >= 0.35 else "downward" if score <= -0.35 else "neutral"
+
+
+def _market_block(db: Session) -> dict:
+    """Price trends (7d / 30d) and the Market Intel pressure outlook, flattened for HA.
+
+    Trends use the same series as the Market Intel model: `retail` (average of the
+    local vendors' reported prices) and `ulsd` (NY Harbor wholesale futures).
+    """
+    out: dict = {}
+    try:
+        ctx = ms.SignalContext(db)
+        today = ctx.today
+        for key, prefix in (("retail", "retail"), ("ulsd", "ulsd")):
+            for days in (7, 30):
+                pct = ctx.pct_change(key, today, days)
+                pct = None if pct is None else round(pct * 100, 2)
+                out[f"{prefix}_price_change_{days}d_pct"] = pct
+                out[f"{prefix}_price_trend_{days}d"] = _trend_label(pct, days)
+        retail_now = ctx.last("retail", today, 10)
+        out["retail_avg_price"] = round(retail_now[1], 3) if retail_now else None
+        ulsd_now = ctx.last("ulsd", today, 10)
+        out["ulsd_futures_price"] = round(ulsd_now[1], 3) if ulsd_now else None
+
+        outlook = ms.compute_outlook(db, ctx=ctx)
+        for h in ms.HORIZONS:
+            r = outlook["horizons"][h]
+            out[f"market_pressure_{h}"] = _pressure_label(r["score"])
+            out[f"market_score_{h}"] = r["score"]
+            out[f"market_outlook_{h}"] = r["outlook"]
+        d = outlook["horizons"]["days"]
+        out["market_confidence"] = d["confidence"]
+        out["market_summary"] = d["summary"]
+        out["market_signals_available"] = outlook["signals_available"]
+    except Exception:  # market data must never break the tank sensor
+        out["market_error"] = True
+    return out
+
+
+def _buy_signal(
+    urgency: str,
+    pressure: Optional[str],
+    trend_7d: Optional[str],
+    vs_avg_pct: Optional[float],
+    space_available: Optional[float],
+) -> tuple[str, str]:
+    """Combine tank urgency, price pressure and price level into one HA-friendly state."""
+    rising = pressure == "upward" or trend_7d == "rising"
+    falling = pressure == "downward" and trend_7d != "rising"
+    if urgency == "critical":
+        return "buy_now", "Tank critically low"
+    if urgency == "low":
+        if rising:
+            return "buy_now", "Tank low and prices pushing up"
+        if falling:
+            return "buy_soon", "Tank low but prices easing; order within a week"
+        return "buy_soon", "Tank getting low"
+    if urgency in ("watch", "ok") and (space_available or 0) >= 100:
+        cheap = vs_avg_pct is not None and vs_avg_pct <= -3.0
+        if cheap and not falling:
+            return "opportunity", "Price is well below the 30-day average"
+        if urgency == "watch" and rising:
+            return "buy_soon", "Prices rising while tank is below comfortable level"
+    return "wait", "No action needed"
 
 
 # ── endpoints ─────────────────────────────────────────────────────────────────
@@ -98,6 +232,10 @@ async def get_home_assistant_state(
     usage_days: int = Query(
         30, ge=7, le=90,
         description="Rolling window used for the 30-day burn-rate fallback."
+    ),
+    lead_days: int = Query(
+        5, ge=0, le=30,
+        description="Typical delivery lead time; used for `order_by_date`."
     ),
     db: Session = Depends(get_db),
 ):
@@ -140,6 +278,40 @@ async def get_home_assistant_state(
               - last_order_price_per_gallon
               - last_order_vendor
               - days_since_last_order
+              - tank_last_reading_at          # tz-aware UTC; safe for device_class: timestamp
+              - tank_last_reading_age_hours   # alert if the gauge stops reporting
+              - order_by_date
+              - buy_signal                    # buy_now | buy_soon | opportunity | wait
+              - buy_reason
+              - price_vs_avg_30d_pct
+              - price_vs_last_order_pct
+              - estimated_fill_cost
+              - retail_price_trend_7d         # rising | stable | falling
+              - retail_price_trend_30d
+              - retail_price_change_7d_pct
+              - retail_price_change_30d_pct
+              - ulsd_price_trend_7d
+              - ulsd_price_trend_30d
+              - market_pressure_days          # upward | neutral | downward
+              - market_pressure_weeks
+              - market_pressure_months
+              - market_score_days             # -2..+2
+              - market_outlook_days
+              - market_confidence
+              - market_summary
+              - usage_latest_date             # most recent normalized day
+              - usage_latest_gallons
+              - usage_vs_7d_avg_pct
+              - usage_total_7d
+              - usage_total_30d
+              - hdd_latest
+              - hdd_avg_7d
+              - hdd_avg_30d
+              - hdd_total_7d
+              - hdd_total_30d
+              - temp_avg_latest
+              - gallons_per_hdd_7d            # efficiency: gal burned per degree-day
+              - gallons_per_hdd_30d
     """
     location = _resolve_location(db, location_id)
 
@@ -149,6 +321,7 @@ async def get_home_assistant_state(
     tank_percent_full = None
     tank_space_available = None
     tank_last_reading_at = None
+    tank_last_reading_age_hours = None
 
     if location:
         tank_capacity = float(location.tank_capacity or 275.0)
@@ -165,7 +338,10 @@ async def get_home_assistant_state(
             tank_gallons = round(float(reading.gallons), 1)
             tank_percent_full = round(tank_gallons / tank_capacity * 100, 1)
             tank_space_available = round(tank_capacity - tank_gallons, 1)
-            tank_last_reading_at = reading.timestamp.isoformat()
+            tank_last_reading_at = _utc_iso(reading.timestamp)
+            tank_last_reading_age_hours = round(
+                (datetime.now(timezone.utc) - reading.timestamp.replace(tzinfo=timezone.utc)
+                 ).total_seconds() / 3600, 1)
 
     # ── Burn Rate (IQR-smoothed, seasonal-aware) ──────────────────────────────
     burn_rate_daily = 0.0
@@ -173,6 +349,7 @@ async def get_home_assistant_state(
     burn_rate_7d = 0.0
     burn_rate_30d = 0.0
     burn_rate_seasonal = None
+    usage_rows = []
     season = get_season_label(date.today().month)
 
     if location:
@@ -300,6 +477,33 @@ async def get_home_assistant_state(
         last_order_vendor = company.name if company else None
         days_since_last_order = (date.today() - order.start_date).days
 
+    usage_hdd = _usage_hdd_block(usage_rows)
+
+    # ── Market trend + buying signal ──────────────────────────────────────────
+    market = _market_block(db)
+
+    order_by_date = None
+    if days_remaining is not None:
+        order_by_date = (date.today() + timedelta(days=max(int(days_remaining) - lead_days, 0))).isoformat()
+
+    price_vs_avg_30d_pct = None
+    if lowest_price and avg_price_30d:
+        price_vs_avg_30d_pct = round((lowest_price / avg_price_30d - 1) * 100, 2)
+    price_vs_last_order_pct = None
+    if lowest_price and last_order_price_per_gallon:
+        price_vs_last_order_pct = round((lowest_price / last_order_price_per_gallon - 1) * 100, 2)
+    estimated_fill_cost = None
+    if lowest_price and tank_space_available is not None:
+        estimated_fill_cost = round(tank_space_available * lowest_price, 2)
+
+    buy_signal, buy_reason = _buy_signal(
+        urgency,
+        market.get("market_pressure_days"),
+        market.get("retail_price_trend_7d"),
+        price_vs_avg_30d_pct,
+        tank_space_available,
+    )
+
     return {
         # Tank
         "tank_gallons": tank_gallons,
@@ -310,6 +514,8 @@ async def get_home_assistant_state(
         "tank_days_remaining": days_remaining,
         "tank_depletion_date": depletion_date,
         "tank_last_reading_at": tank_last_reading_at,
+        "tank_last_reading_age_hours": tank_last_reading_age_hours,
+        "order_by_date": order_by_date,
         # Burn rate
         "burn_rate_daily": round(burn_rate_daily, 3),
         "burn_rate_source": burn_rate_source,
@@ -332,6 +538,16 @@ async def get_home_assistant_state(
         "last_order_price_per_gallon": last_order_price_per_gallon,
         "last_order_vendor": last_order_vendor,
         "days_since_last_order": days_since_last_order,
+        # Buying signal
+        "buy_signal": buy_signal,
+        "buy_reason": buy_reason,
+        "price_vs_avg_30d_pct": price_vs_avg_30d_pct,
+        "price_vs_last_order_pct": price_vs_last_order_pct,
+        "estimated_fill_cost": estimated_fill_cost,
+        # Daily usage + heating demand (HDD)
+        **usage_hdd,
+        # Market trend + pressure
+        **market,
     }
 
 
