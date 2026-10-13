@@ -317,9 +317,10 @@ async def get_monthly_price_trends(
     """Monthly min/avg/max price for long-term trend charting.
 
     `months=0` returns all available history. Months are keyed on the
-    observation (scraped) date, consistent with /price-trends.
+    reported date, not scraped_at, because historical imports stamp
+    scraped_at with the import time.
     """
-    obs_date = func.date(OilPrice.scraped_at)
+    obs_date = OilPrice.date_reported
     year = func.extract('year', obs_date).label('yr')
     month = func.extract('month', obs_date).label('mo')
 
