@@ -729,26 +729,6 @@ async function renderDashboard(container) {
       </div>
 
       <div class="card mt-lg">
-        <div class="card-header flex items-center justify-between">
-          <h3 class="card-title">Monthly Price History</h3>
-          <select id="monthly-price-range" class="form-select" style="width:auto;" onchange="loadMonthlyPriceChart(this.value)">
-            <option value="12">Last 12 months</option>
-            <option value="24" selected>Last 2 years</option>
-            <option value="36">Last 3 years</option>
-            <option value="60">Last 5 years</option>
-            <option value="120">Last 10 years</option>
-            <option value="0">All history</option>
-          </select>
-        </div>
-        <div class="card-body">
-          <p class="text-xs text-secondary mb-md">Monthly minimum, average and maximum local delivery price. The shaded band is the min–max range.</p>
-          <div class="chart-container" id="monthly-price-container">
-            <canvas id="monthly-price-chart"></canvas>
-          </div>
-        </div>
-      </div>
-
-      <div class="card mt-lg">
         <div class="card-header">
           <h3 class="card-title">Temperature & Usage Correlation</h3>
         </div>
@@ -774,9 +754,6 @@ async function renderDashboard(container) {
     } catch (e) {
       console.error('Failed to render Price Trends chart:', e);
     }
-
-    // 1b. Monthly Price History
-    loadMonthlyPriceChart(document.getElementById('monthly-price-range')?.value || 24);
 
     // 2. Long-Term Order Analysis
     try {
@@ -6271,6 +6248,25 @@ async function renderCommandCenter(container) {
         </div>
       </div>
 
+      <!-- Monthly Price History -->
+      <div class="card glass-effect mb-lg animate-fade-in">
+        <div class="card-header">
+          <h3 class="card-title">Monthly Price History</h3>
+          <select id="monthly-price-range" class="form-select" style="width:auto;" onchange="loadMonthlyPriceChart(this.value)">
+            <option value="12">Last 12 months</option>
+            <option value="24" selected>Last 2 years</option>
+            <option value="36">Last 3 years</option>
+            <option value="60">Last 5 years</option>
+            <option value="120">Last 10 years</option>
+            <option value="0">All history</option>
+          </select>
+        </div>
+        <div class="card-body">
+          <p class="text-xs text-secondary mb-md">Monthly minimum, average and maximum local delivery price. The shaded band is the min–max range.</p>
+          <div class="chart-container" id="monthly-price-container"><canvas id="monthly-price-chart"></canvas></div>
+        </div>
+      </div>
+
       <!-- Temperature Correlation -->
       <div class="card glass-effect animate-fade-in">
         <div class="card-header">
@@ -6290,6 +6286,7 @@ async function renderCommandCenter(container) {
       const el = document.getElementById('cc-price-chart');
       if (el) storeChart('cc-price', createPriceTrendChart(el, priceTrends));
     }
+    loadMonthlyPriceChart(24);
     if (orderInsights?.length) {
       const el = document.getElementById('cc-order-chart');
       if (el) storeChart('cc-order', createYearlyOrderInsightChart(el, orderInsights));
