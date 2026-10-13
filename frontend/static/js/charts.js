@@ -128,6 +128,82 @@ function createPriceTrendChart(ctx, data) {
 }
 
 /**
+ * Create a monthly price range chart (min/max band with average line)
+ */
+function createMonthlyPriceTrendChart(ctx, data) {
+    const existing = Chart.getChart(ctx);
+    if (existing) existing.destroy();
+    return new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: data.labels,
+            datasets: [
+                {
+                    label: 'Max Price',
+                    data: data.datasets.max,
+                    borderColor: chartColors.error,
+                    backgroundColor: 'rgba(94, 106, 210, 0.12)',
+                    fill: '+2',
+                    tension: 0.3,
+                    pointRadius: 2,
+                    pointHoverRadius: 6,
+                    borderWidth: 1.5,
+                },
+                {
+                    label: 'Average Price',
+                    data: data.datasets.avg,
+                    borderColor: chartColors.primary,
+                    backgroundColor: 'transparent',
+                    tension: 0.3,
+                    pointRadius: 3,
+                    pointHoverRadius: 6,
+                    borderWidth: 2.5,
+                },
+                {
+                    label: 'Min Price',
+                    data: data.datasets.min,
+                    borderColor: chartColors.success,
+                    backgroundColor: 'transparent',
+                    tension: 0.3,
+                    pointRadius: 2,
+                    pointHoverRadius: 6,
+                    borderWidth: 1.5,
+                },
+            ],
+        },
+        options: {
+            ...chartConfig,
+            scales: {
+                x: {
+                    type: 'time',
+                    time: {
+                        unit: 'month',
+                        tooltipFormat: 'MMM yyyy',
+                        displayFormats: { month: 'MMM yyyy' },
+                    },
+                    ticks: { maxTicksLimit: 14, maxRotation: 0, autoSkip: true },
+                    grid: { display: false },
+                },
+                y: {
+                    beginAtZero: false,
+                    grid: { color: '#2a2a2a' },
+                    ticks: { callback: (value) => `$${value.toFixed(2)}` },
+                },
+            },
+            plugins: {
+                ...chartConfig.plugins,
+                tooltip: {
+                    ...chartConfig.plugins.tooltip,
+                    callbacks: {
+                        label: (context) => `${context.dataset.label}: $${context.parsed.y.toFixed(3)}`,
+                    },
+                },
+            },
+        },
+    });
+}
+
+/**
  * Create an order history bar chart
  */
 function createOrderChart(ctx, data) {

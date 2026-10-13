@@ -138,6 +138,12 @@ class ApiClient {
     return this.request(`/dashboard/price-trends?${params}`);
   }
 
+  async getMonthlyPriceTrends(months = 24, companyId = null) {
+    const params = new URLSearchParams({ months });
+    if (companyId) params.append('company_id', companyId);
+    return this.request(`/dashboard/price-trends-monthly?${params}`);
+  }
+
   async getOrderTrends(months = 12, locationId = null) {
     const params = new URLSearchParams({ months });
     if (locationId) params.append('location_id', locationId);

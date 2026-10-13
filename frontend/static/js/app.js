@@ -729,6 +729,26 @@ async function renderDashboard(container) {
       </div>
 
       <div class="card mt-lg">
+        <div class="card-header flex items-center justify-between">
+          <h3 class="card-title">Monthly Price History</h3>
+          <select id="monthly-price-range" class="form-select" style="width:auto;" onchange="loadMonthlyPriceChart(this.value)">
+            <option value="12">Last 12 months</option>
+            <option value="24" selected>Last 2 years</option>
+            <option value="36">Last 3 years</option>
+            <option value="60">Last 5 years</option>
+            <option value="120">Last 10 years</option>
+            <option value="0">All history</option>
+          </select>
+        </div>
+        <div class="card-body">
+          <p class="text-xs text-secondary mb-md">Monthly minimum, average and maximum local delivery price. The shaded band is the min–max range.</p>
+          <div class="chart-container" id="monthly-price-container">
+            <canvas id="monthly-price-chart"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <div class="card mt-lg">
         <div class="card-header">
           <h3 class="card-title">Temperature & Usage Correlation</h3>
         </div>
@@ -754,6 +774,9 @@ async function renderDashboard(container) {
     } catch (e) {
       console.error('Failed to render Price Trends chart:', e);
     }
+
+    // 1b. Monthly Price History
+    loadMonthlyPriceChart(document.getElementById('monthly-price-range')?.value || 24);
 
     // 2. Long-Term Order Analysis
     try {
@@ -789,6 +812,24 @@ async function renderDashboard(container) {
       console.error('Failed to render Temperature Correlation chart:', e);
     }
   }, 500); // 500ms delay to allow CSS grid/flex animations to settle before measuring canvas
+}
+
+async function loadMonthlyPriceChart(months = 24) {
+  const container = document.getElementById('monthly-price-container');
+  if (!container) return;
+  try {
+    const data = await api.getMonthlyPriceTrends(parseInt(months, 10));
+    if (!data.labels?.length) {
+      container.innerHTML = '<p class="text-secondary text-sm">No price history available for this range.</p>';
+      return;
+    }
+    if (!document.getElementById('monthly-price-chart')) {
+      container.innerHTML = '<canvas id="monthly-price-chart"></canvas>';
+    }
+    storeChart('monthly-price', createMonthlyPriceTrendChart(document.getElementById('monthly-price-chart'), data));
+  } catch (e) {
+    console.error('Failed to render Monthly Price History chart:', e);
+  }
 }
 
 async function runQuickScrape() {

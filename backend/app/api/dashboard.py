@@ -308,6 +308,54 @@ async def get_price_trends(
     }
 
 
+@router.get("/price-trends-monthly")
+async def get_monthly_price_trends(
+    months: int = 24,
+    company_id: Optional[int] = None,
+    db: Session = Depends(get_db)
+):
+    """Monthly min/avg/max price for long-term trend charting.
+
+    `months=0` returns all available history. Months are keyed on the
+    observation (scraped) date, consistent with /price-trends.
+    """
+    obs_date = func.date(OilPrice.scraped_at)
+    year = func.extract('year', obs_date).label('yr')
+    month = func.extract('month', obs_date).label('mo')
+
+    query = db.query(
+        year,
+        month,
+        func.min(OilPrice.price_per_gallon).label('min_price'),
+        func.max(OilPrice.price_per_gallon).label('max_price'),
+        func.avg(OilPrice.price_per_gallon).label('avg_price'),
+        func.count(OilPrice.id).label('samples'),
+    ).join(Company)
+
+    if months and months > 0:
+        today = date.today()
+        total = today.year * 12 + (today.month - 1) - (months - 1)
+        start = date(total // 12, total % 12 + 1, 1)
+        query = query.filter(obs_date >= start)
+
+    if company_id:
+        query = query.filter(OilPrice.company_id == company_id)
+    else:
+        query = query.filter(Company.is_market_index == False)
+
+    results = query.group_by('yr', 'mo').order_by('yr', 'mo').all()
+
+    return {
+        "labels": [f"{int(r.yr):04d}-{int(r.mo):02d}-01" for r in results],
+        "datasets": {
+            "min": [float(r.min_price) for r in results],
+            "max": [float(r.max_price) for r in results],
+            "avg": [round(float(r.avg_price), 4) for r in results],
+        },
+        "samples": [r.samples for r in results],
+    }
+
+
 @router.get("/order-trends")
 async def get_order_trends(
     months: int = 12,
